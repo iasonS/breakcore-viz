@@ -14,21 +14,22 @@ fn main() {
         let method = request.method();
         let url = request.url();
 
-        eprintln!("{} {}", method, url);
+        eprintln!("[{}] {}", method, url);
 
-        let response = if url == "/" {
-            serve_index()
-        } else if url.starts_with("/pkg/") {
-            serve_wasm_artifact(url)
-        } else if url == "/health" {
-            tiny_http::Response::from_string(r#"{"status":"ok","service":"breakcore-viz"}"#.to_string())
-                .with_header(
-                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                        .unwrap(),
-                )
-        } else {
-            tiny_http::Response::from_string("<h1>404 Not Found</h1>".to_string())
-                .with_status_code(404)
+        let response = match url {
+            "/" => serve_index(),
+            "/health" => {
+                tiny_http::Response::from_string(r#"{"status":"ok","service":"breakcore-viz"}"#.to_string())
+                    .with_header(
+                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                            .unwrap(),
+                    )
+            },
+            _ if url.starts_with("/pkg/") => serve_wasm_artifact(url),
+            _ => {
+                tiny_http::Response::from_string("<h1>404 Not Found</h1>".to_string())
+                    .with_status_code(404)
+            }
         };
 
         let _ = request.respond(response);
