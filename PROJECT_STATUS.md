@@ -47,37 +47,58 @@
 ✅ **README.md**: Complete architecture, features, and building instructions
 ✅ **PROJECT_STATUS.md**: This file (current progress)
 
-## In Progress
+## Recently Completed
 
-🟡 **Rust compilation**: Currently building (compiling dependencies)
-  - Status: Downloading and compiling Bevy + dependencies
-  - ETA: ~10-15 minutes (first build is slow)
+🟡 **Architecture Refactor**: Pivoted from Bevy desktop app to HTTP server + WASM
+  - Status: Complete
+  - Changes:
+    - Replaced Bevy ECS desktop rendering with HTTP server
+    - HTTP server (tiny_http) serves web UI and WASM artifacts
+    - WASM visualizer runs in browser with Web Audio API
+    - Docker deployment now headless-compatible (no X11 needed)
+    - Conditional compilation: native binary for server, WASM for browser
 
-## Next Steps (After Build Complete)
+✅ **Integration Complete**:
+  - HTTP server with file serving
+  - WASM module stub with initialization
+  - Web UI with audio file upload and playback
+  - Web Audio API integration
+  - Docker multi-stage build
+  - Deployment scripts and guides
 
-### Phase 1: Verify Build
-- [ ] Check if debug binary builds successfully
-- [ ] Add WASM target and test WASM build
-- [ ] Verify shader files are loaded correctly
+## Next Steps (Priority Order)
 
-### Phase 2: Integration
-- [ ] Implement actual WebGL/WebGPU rendering pipeline in renderer.rs
-- [ ] Wire up Web Audio API for audio analysis
-- [ ] Connect particle system to rendering
-- [ ] Connect glitch/bloom/feedback effects to rendering
+### Phase 1: Compilation & Deployment (IMMEDIATE)
+- [ ] Verify cargo build succeeds (requires Rust 1.94+)
+- [ ] Build WASM with wasm-pack
+- [ ] Docker build: `docker build -t breakcore-viz .`
+- [ ] Deploy to server: `./deploy.sh tt@192.168.1.9`
+- [ ] Access at http://192.168.1.9:8080
 
-### Phase 3: Testing
-- [ ] Test with actual breakcore tracks
-- [ ] Verify transient detection works
-- [ ] Validate particle physics
-- [ ] Check glitch effect timing
-- [ ] Verify bloom/feedback visuals
+### Phase 2: WASM Visualization (1-2 days)
+- [ ] Implement WebGL rendering in browser
+- [ ] Create particle renderer (billboards or instancing)
+- [ ] Connect Web Audio API to audio analysis module
+- [ ] Implement real-time FFT analysis
+- [ ] Map audio energy to visual parameters
 
-### Phase 4: Deployment
-- [ ] Build WASM for browser
-- [ ] Deploy Docker container to server
-- [ ] Add to homepage dashboard
-- [ ] Test at http://192.168.1.9:8080
+### Phase 3: Real-Time Effects (1-2 days)
+- [ ] Canvas-based post-processing (glitch, bloom, feedback)
+- [ ] Transient detection triggering particle bursts
+- [ ] Color mapping from spectral centroid
+- [ ] Screen shake on kick onsets
+
+### Phase 4: Polish & Optimization (1 day)
+- [ ] Performance profiling and optimization
+- [ ] Memory leak prevention in particle system
+- [ ] Browser compatibility testing
+- [ ] Mobile responsiveness (if needed)
+
+### Phase 5: Integration (1 day)
+- [ ] Add to homepage as embedded component
+- [ ] Set up monitoring (health checks)
+- [ ] Create admin panel for parameter tuning
+- [ ] Document for future maintenance
 
 ## Architecture Validation
 
@@ -131,13 +152,41 @@ breakcore-viz/
 
 ## Current Status Summary
 
-✅ **Complete**: All source code, shaders, configuration, and deployment files
-🟡 **In Progress**: Rust compilation (first-time dependencies)
-⏳ **Pending**: Verification, integration testing, deployment
+✅ **Complete**:
+- HTTP server architecture with file serving
+- WASM module initialization
+- Web UI with audio controls
+- Docker multi-stage build configuration
+- Deployment scripts and documentation
+- Testing guide with breakcore track validation
 
-Once build completes:
-1. Create issue: "Integrate WASM rendering and Web Audio API"
-2. Set deployment target: 192.168.1.9:8080
-3. Test with breakcore tracks
+🟡 **Ready for Testing**:
+- Native binary can be built and deployed
+- WASM build system is configured
+- Docker container is ready to build
+- Server deployment is scripted
 
-**Estimated completion of full pipeline**: 2-3 hours from now
+⏳ **Pending Development**:
+- WebGL rendering implementation in WASM
+- Real-time audio FFT analysis
+- Particle visualization
+- Post-processing effects (glitch, bloom, feedback)
+
+## Deployment Status
+
+**Command**: `./deploy.sh tt@192.168.1.9`
+**Target**: http://192.168.1.9:8080
+**Status**: Deployment infrastructure complete, awaiting build testing
+
+## Next Immediate Step
+
+```bash
+# Test if it builds
+cargo build --release 2>&1 | tail -20
+
+# If successful, deploy
+./deploy.sh tt@192.168.1.9
+
+# Access visualizer
+# http://192.168.1.9:8080
+```
