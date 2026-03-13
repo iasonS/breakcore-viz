@@ -36,7 +36,11 @@ rsync -avz --delete \
     --exclude='target' \
     --exclude='.git' \
     --exclude='node_modules' \
+    --exclude='*.lock' \
     . "$SERVER:$DEPLOY_DIR/"
+
+# Ensure web directory is synced (rsync sometimes skips empty dirs)
+rsync -avz web/ "$SERVER:$DEPLOY_DIR/web/"
 
 echo "[3/4] Building Docker image..."
 ssh "$SERVER" "cd $DEPLOY_DIR && docker build -t breakcore-viz:latest ."
