@@ -6,7 +6,7 @@ WORKDIR /build
 # Copy manifests
 COPY Cargo.* ./
 
-# Copy source
+# Copy source and web UI (needed for include_str! macro)
 COPY src ./src
 COPY assets ./assets
 COPY web ./web
@@ -26,9 +26,8 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /build/target/release/breakcore_viz /app/breakcore-viz
 
-# Copy assets and web files
+# Copy assets (optional, for future features)
 COPY assets ./assets
-COPY web ./web
 
 EXPOSE 3000
 

@@ -36,19 +36,12 @@ fn main() {
 }
 
 fn serve_index() -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    let paths = &["web/index.html", "index.html", "/app/web/index.html"];
+    let html = include_str!("../web/index.html");
 
-    for path in paths {
-        if let Ok(content) = fs::read_to_string(path) {
-            return tiny_http::Response::from_string(content).with_header(
-                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..])
-                    .unwrap(),
-            );
-        }
-    }
-
-    tiny_http::Response::from_string("<h1>404 Not Found</h1>".to_string())
-        .with_status_code(404)
+    tiny_http::Response::from_string(html.to_string()).with_header(
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..])
+            .unwrap(),
+    )
 }
 
 fn serve_wasm_artifact(url: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
