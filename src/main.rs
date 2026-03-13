@@ -1,217 +1,95 @@
-use bevy::prelude::*;
-
 mod audio;
 mod particles;
 mod renderer;
 mod effects;
 
-use audio::{AudioAnalyzer, AudioData};
-use particles::ParticleSystem;
-use renderer::BreakCoreRenderer;
-use effects::{GlitchEngine, BloomPass, FeedbackTrail};
+#[cfg(target_arch = "wasm32")]
+pub mod wasm_app;
 
-#[derive(Component)]
-struct ParticleVisual;
-
-#[derive(Component)]
-struct FormCore;
-
-#[derive(Resource)]
-struct VisualizerState {
-    time: f32,
-    frame_num: u32,
-    particles: ParticleSystem,
-    audio_analyzer: AudioAnalyzer,
-    audio_data: AudioData,
-    renderer: BreakCoreRenderer,
-    glitch_engine: GlitchEngine,
-    bloom_pass: BloomPass,
-    feedback_trail: FeedbackTrail,
-}
-
-impl Default for VisualizerState {
-    fn default() -> Self {
-        Self {
-            time: 0.0,
-            frame_num: 0,
-            particles: ParticleSystem::new(),
-            audio_analyzer: AudioAnalyzer::new(),
-            audio_data: AudioData::default(),
-            renderer: BreakCoreRenderer::new(),
-            glitch_engine: GlitchEngine::new(1280, 720),
-            bloom_pass: BloomPass::new(1280, 720),
-            feedback_trail: FeedbackTrail::new(1280, 720),
-        }
-    }
-}
-
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "BREAKCORE VISUALIZER".to_string(),
-                resolution: bevy::window::WindowResolution::new(1280.0, 720.0),
-                ..default()
-            }),
-            ..default()
-        }))
-        .insert_resource(VisualizerState::default())
-        .add_systems(Startup, setup)
-        .add_systems(Update, (
-            update_audio_and_particles,
-            update_effects,
-            render_visualization,
-        ))
-        .run();
-}
+    // HTTP server for serving the web UI and WASM visualizer
+    use std::fs;
+    use std::path::Path;
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // Camera
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(0.0, 0.0, 5.0),
-        ..default()
-    });
+    let addr = "0.0.0.0:3000";
+    let server = tiny_http::Server::http(addr).expect("Failed to start server");
 
-    // Directional light
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            color: Color::srgb(1.0, 1.0, 1.0),
-            illuminance: 10000.0,
-            ..default()
-        },
-        transform: Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
+    println!("🎵 Breakcore Visualizer Server");
+    println!("Listening on http://{}:3000", "localhost");
+    println!("");
+    println!("Access points:");
+    println!("  Web UI: http://localhost:3000");
+    println!("  API: http://localhost:3000/api/audio");
+    println!("");
 
-    // Core form (will be updated each frame)
-    // Create a simple icosphere mesh for visualization
-    let core_mesh = create_icosphere_mesh(&mut meshes);
-    let core_material = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.0, 0.2, 1.0, 0.8),
-        emissive: Color::srgb(0.0, 0.1, 0.5).into(),
-        ..default()
-    });
+    for request in server.incoming_requests() {
+        let method = request.method();
+        let url = request.url();
 
-    commands.spawn((
-        FormCore,
-        PbrBundle {
-            mesh: core_mesh,
-            material: core_material,
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
-            ..default()
-        },
-    ));
-}
+        // Log request
+        eprintln!("{} {}", method, url);
 
-fn update_audio_and_particles(mut state: ResMut<VisualizerState>) {
-    const DELTA_TIME: f32 = 0.016;
+        let response = if url == "/" {
+            // Serve index.html
+            match fs::read_to_string("web/index.html") {
+                Ok(content) => {
+                    tiny_http::Response::from_string(content)
+                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap())
+                }
+                Err(_) => tiny_http::Response::from_string("<h1>404 Not Found</h1>".to_string())
+                    .with_status_code(404),
+            }
+        } else if url.starts_with("/pkg/") {
+            // Serve WASM artifacts
+            let file_path = format!("web{}", url);
+            if Path::new(&file_path).exists() {
+                match fs::read(&file_path) {
+                    Ok(content) => {
+                        let content_type = if url.ends_with(".js") {
+                            "application/javascript"
+                        } else if url.ends_with(".wasm") {
+                            "application/wasm"
+                        } else {
+                            "application/octet-stream"
+                        };
 
-    state.time += DELTA_TIME;
-    state.frame_num += 1;
-
-    // Update audio analysis
-    state.audio_data = state.audio_analyzer.update(state.frame_num);
-
-    // Spawn particles based on audio events
-    state.particles.spawn(&state.audio_data, state.frame_num);
-
-    // Update particle physics
-    state.particles.update(DELTA_TIME);
-
-    // Update renderer with audio data
-    state.renderer.render(&state.audio_data);
-}
-
-fn update_effects(mut state: ResMut<VisualizerState>) {
-    // Update effect engines
-    if state.audio_data.kick_onset {
-        state.glitch_engine.trigger(0.8);
-    }
-    if state.audio_data.chaos > 3.0 {
-        state.glitch_engine.trigger(state.audio_data.chaos * 0.2);
-    }
-
-    state.glitch_engine.update();
-}
-
-fn render_visualization(
-    state: Res<VisualizerState>,
-    mut query: Query<&mut Transform, With<FormCore>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut form_query: Query<&mut Handle<StandardMaterial>, With<FormCore>>,
-) {
-    // Update core form scale and color based on audio
-    if let Ok(mut transform) = query.get_single_mut() {
-        let scale = 0.5 * (1.8 + state.audio_data.kick_energy * 1.7);
-        transform.scale = Vec3::splat(scale);
-    }
-
-    // Update core form color
-    if let Ok(material_handle) = form_query.get_single_mut() {
-        if let Some(material) = materials.get_mut(material_handle.as_ref()) {
-            let (r, g, b) = if state.audio_data.kick_onset {
-                (1.0, 0.0, 1.0)
+                        tiny_http::Response::from_data(content)
+                            .with_header(
+                                tiny_http::Header::from_bytes(
+                                    &b"Content-Type"[..],
+                                    content_type.as_bytes(),
+                                )
+                                .unwrap(),
+                            )
+                    }
+                    Err(_) => tiny_http::Response::from_string("<h1>404 Not Found</h1>".to_string())
+                        .with_status_code(404),
+                }
             } else {
-                let energy = state.audio_data.total_energy.min(1.0);
-                (energy * 0.8, 0.0, energy)
-            };
+                tiny_http::Response::from_string("<h1>404 Not Found</h1>".to_string())
+                    .with_status_code(404)
+            }
+        } else if url == "/api/audio" && *method == tiny_http::Method::Post {
+            // Audio analysis endpoint
+            tiny_http::Response::from_string(r#"{"status":"ok"}"#.to_string())
+                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+        } else if url == "/health" {
+            // Health check
+            tiny_http::Response::from_string(r#"{"status":"ok","service":"breakcore-viz"}"#.to_string())
+                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+        } else {
+            tiny_http::Response::from_string("<h1>404 Not Found</h1>".to_string())
+                .with_status_code(404)
+        };
 
-            material.base_color = Color::srgba(r, g, b, 0.8);
-            material.emissive = Color::srgb(r * 0.5, g * 0.5, b * 0.5).into();
-        }
+        let _ = request.respond(response);
     }
 }
 
-// Create a simple icosphere mesh for the core form
-fn create_icosphere_mesh(meshes: &mut ResMut<Assets<Mesh>>) -> Handle<Mesh> {
-    // Golden ratio
-    let t = (1.0 + 5.0_f32.sqrt()) / 2.0;
-
-    // Create icosphere vertices
-    let vertices = [
-        [-1.0, t, -1.0],
-        [1.0, t, -1.0],
-        [-1.0, t, 1.0],
-        [1.0, t, 1.0],
-        [-1.0, -t, -1.0],
-        [1.0, -t, -1.0],
-        [-1.0, -t, 1.0],
-        [1.0, -t, 1.0],
-        [-t, -1.0, 1.0],
-        [t, -1.0, 1.0],
-        [-t, 1.0, 1.0],
-        [t, 1.0, 1.0],
-        [-t, -1.0, -1.0],
-        [t, -1.0, -1.0],
-        [-t, 1.0, -1.0],
-        [t, 1.0, -1.0],
-    ];
-
-    // Normalize vertices
-    let mut positions = Vec::new();
-    for v in &vertices {
-        let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-        positions.push([v[0] / len, v[1] / len, v[2] / len]);
-    }
-
-    let indices = vec![
-        0, 11, 5, 0, 5, 1, 0, 1, 4, 0, 4, 14,
-        3, 9, 11, 5, 13, 9, 1, 13, 15,
-        3, 7, 9, 4, 12, 13, 2, 14, 10,
-        15, 14, 2, 14, 4, 12, 14, 12, 2,
-        10, 2, 6, 6, 8, 10, 9, 8, 11,
-        11, 10, 14, 11, 14, 15, 11, 15, 13, 11, 13, 9,
-        3, 13, 7, 13, 12, 7, 12, 6, 7, 6, 9, 7,
-        9, 10, 8, 8, 6, 10,
-    ];
-
-    let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.set_indices(Some(bevy::render::mesh::Indices::U32(indices)));
-
-    meshes.add(mesh)
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn run_visualizer() {
+    // WASM entry point for browser visualization
+    web_sys::console::log_1(&"Breakcore Visualizer loaded".into());
 }
