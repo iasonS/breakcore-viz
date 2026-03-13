@@ -131,16 +131,46 @@ Common issues:
 - Reduce raymarching_steps (currently 120)
 - Disable bloom/feedback effects in renderer.rs
 
-## Deployment Checklist
+## Deployment
+
+### Quick Deploy to Server
+
+```bash
+# Make sure you have SSH access to your server
+chmod +x deploy.sh
+./deploy.sh tt@192.168.1.9
+
+# Access at: http://192.168.1.9:8080
+```
+
+### Manual Docker Deployment
+
+```bash
+# Build
+docker build -t breakcore-viz .
+
+# Run locally
+docker run -p 8080:3000 \
+  -v $(pwd)/assets:/app/assets:ro \
+  -e RUST_LOG=info \
+  breakcore-viz
+
+# Or use docker-compose (recommended)
+docker-compose up -d
+```
+
+### Deployment Checklist
 
 Before pushing to production:
 
 - [ ] Test with 5+ different breakcore tracks
 - [ ] Verify particle count stays under 3000
 - [ ] Check glitch effect timing matches beats
-- [ ] Confirm bloom doesn't wash out colors
+- [ ] Confirm visual effects scale with energy correctly
 - [ ] Test fullscreen and various resolutions
-- [ ] Validate mobile responsiveness (if applicable)
+- [ ] Validate performance (target: 60 FPS at 1280x720)
+- [ ] Confirm no audio latency issues
+- [ ] Test with both local files and streaming audio
 
 ## Next Development Goals
 

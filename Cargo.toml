@@ -9,8 +9,10 @@ bevy = { version = "0.14", default-features = false, features = [
     "bevy_core_pipeline",
     "bevy_pbr",
     "bevy_sprite",
+    "bevy_scene",
+    "multi_threaded",
     "x11",
-    "multi_threaded"
+    "glsl_to_spirv"
 ] }
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }

@@ -88,8 +88,8 @@ fn setup(
     });
 
     // Core form (will be updated each frame)
-    // Create a simple box mesh - can be replaced with raymarched form later
-    let core_mesh = meshes.add(Mesh::from(shape::Box::new(1.0, 1.0, 1.0)));
+    // Create a simple icosphere mesh for visualization
+    let core_mesh = create_icosphere_mesh(&mut meshes);
     let core_material = materials.add(StandardMaterial {
         base_color: Color::srgba(0.0, 0.2, 1.0, 0.8),
         emissive: Color::srgb(0.0, 0.1, 0.5).into(),
@@ -164,4 +164,54 @@ fn render_visualization(
             material.emissive = Color::srgb(r * 0.5, g * 0.5, b * 0.5).into();
         }
     }
+}
+
+// Create a simple icosphere mesh for the core form
+fn create_icosphere_mesh(meshes: &mut ResMut<Assets<Mesh>>) -> Handle<Mesh> {
+    // Golden ratio
+    let t = (1.0 + 5.0_f32.sqrt()) / 2.0;
+
+    // Create icosphere vertices
+    let vertices = [
+        [-1.0, t, -1.0],
+        [1.0, t, -1.0],
+        [-1.0, t, 1.0],
+        [1.0, t, 1.0],
+        [-1.0, -t, -1.0],
+        [1.0, -t, -1.0],
+        [-1.0, -t, 1.0],
+        [1.0, -t, 1.0],
+        [-t, -1.0, 1.0],
+        [t, -1.0, 1.0],
+        [-t, 1.0, 1.0],
+        [t, 1.0, 1.0],
+        [-t, -1.0, -1.0],
+        [t, -1.0, -1.0],
+        [-t, 1.0, -1.0],
+        [t, 1.0, -1.0],
+    ];
+
+    // Normalize vertices
+    let mut positions = Vec::new();
+    for v in &vertices {
+        let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        positions.push([v[0] / len, v[1] / len, v[2] / len]);
+    }
+
+    let indices = vec![
+        0, 11, 5, 0, 5, 1, 0, 1, 4, 0, 4, 14,
+        3, 9, 11, 5, 13, 9, 1, 13, 15,
+        3, 7, 9, 4, 12, 13, 2, 14, 10,
+        15, 14, 2, 14, 4, 12, 14, 12, 2,
+        10, 2, 6, 6, 8, 10, 9, 8, 11,
+        11, 10, 14, 11, 14, 15, 11, 15, 13, 11, 13, 9,
+        3, 13, 7, 13, 12, 7, 12, 6, 7, 6, 9, 7,
+        9, 10, 8, 8, 6, 10,
+    ];
+
+    let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.set_indices(Some(bevy::render::mesh::Indices::U32(indices)));
+
+    meshes.add(mesh)
 }
