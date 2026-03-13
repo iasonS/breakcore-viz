@@ -43,7 +43,7 @@ rsync -avz --delete \
 rsync -avz web/ "$SERVER:$DEPLOY_DIR/web/"
 
 echo "[3/4] Building Docker image..."
-ssh "$SERVER" "cd $DEPLOY_DIR && docker build -t breakcore-viz:latest ."
+ssh "$SERVER" "cd $DEPLOY_DIR && docker build --no-cache -t breakcore-viz:latest ."
 
 echo "[4/4] Starting Docker container..."
 ssh "$SERVER" "cd $DEPLOY_DIR && docker-compose down || true && docker-compose up -d"
