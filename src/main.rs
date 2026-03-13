@@ -10,6 +10,12 @@ use particles::ParticleSystem;
 use renderer::BreakCoreRenderer;
 use effects::{GlitchEngine, BloomPass, FeedbackTrail};
 
+#[derive(Component)]
+struct ParticleVisual;
+
+#[derive(Component)]
+struct FormCore;
+
 #[derive(Resource)]
 struct VisualizerState {
     time: f32,
@@ -51,21 +57,57 @@ fn main() {
         }))
         .insert_resource(VisualizerState::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, update_loop)
+        .add_systems(Update, (
+            update_audio_and_particles,
+            update_effects,
+            render_visualization,
+        ))
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // Camera
     commands.spawn(Camera3dBundle {
         transform: Transform::from_xyz(0.0, 0.0, 5.0),
         ..default()
     });
+
+    // Directional light
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            color: Color::srgb(1.0, 1.0, 1.0),
+            illuminance: 10000.0,
+            ..default()
+        },
+        transform: Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..default()
+    });
+
+    // Core form (will be updated each frame)
+    // Create a simple box mesh - can be replaced with raymarched form later
+    let core_mesh = meshes.add(Mesh::from(shape::Box::new(1.0, 1.0, 1.0)));
+    let core_material = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.0, 0.2, 1.0, 0.8),
+        emissive: Color::srgb(0.0, 0.1, 0.5).into(),
+        ..default()
+    });
+
+    commands.spawn((
+        FormCore,
+        PbrBundle {
+            mesh: core_mesh,
+            material: core_material,
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            ..default()
+        },
+    ));
 }
 
-fn update_loop(
-    mut state: ResMut<VisualizerState>,
-    mut gizmos: Gizmos,
-) {
+fn update_audio_and_particles(mut state: ResMut<VisualizerState>) {
     const DELTA_TIME: f32 = 0.016;
 
     state.time += DELTA_TIME;
@@ -82,7 +124,9 @@ fn update_loop(
 
     // Update renderer with audio data
     state.renderer.render(&state.audio_data);
+}
 
+fn update_effects(mut state: ResMut<VisualizerState>) {
     // Update effect engines
     if state.audio_data.kick_onset {
         state.glitch_engine.trigger(0.8);
@@ -92,62 +136,32 @@ fn update_loop(
     }
 
     state.glitch_engine.update();
-
-    // Render particles as visual representation
-    for particle in &state.particles.particles {
-        let hsl_to_rgb = hsl_to_rgb(particle.h, particle.s, particle.l);
-        let color = Color::srgb(hsl_to_rgb.0, hsl_to_rgb.1, hsl_to_rgb.2);
-
-        // Draw particle as sphere gizmo
-        gizmos.sphere(
-            particle.pos,
-            Quat::IDENTITY,
-            particle.size * 0.01,
-            color,
-        );
-
-        // Draw trail
-        for i in 0..particle.trail.len().saturating_sub(1) {
-            let trail_color = Color::srgba(
-                hsl_to_rgb.0,
-                hsl_to_rgb.1,
-                hsl_to_rgb.2,
-                (i as f32 / particle.trail.len() as f32) * particle.life,
-            );
-            gizmos.line(particle.trail[i], particle.trail[i + 1], trail_color);
-        }
-    }
-
-    // Render core form visualization
-    let form_scale = 1.8 + state.audio_data.kick_energy * 1.7;
-    let form_color = if state.audio_data.kick_onset {
-        Color::srgb(1.0, 0.0, 1.0)
-    } else {
-        let energy_fade = state.audio_data.total_energy.min(1.0);
-        Color::srgb(energy_fade * 0.8, 0.0, energy_fade)
-    };
-
-    gizmos.sphere(Vec3::ZERO, Quat::IDENTITY, form_scale * 0.5, form_color);
 }
 
-fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
-    let h = h % 360.0;
-    let s = (s / 100.0).clamp(0.0, 1.0);
-    let l = (l / 100.0).clamp(0.0, 1.0);
+fn render_visualization(
+    state: Res<VisualizerState>,
+    mut query: Query<&mut Transform, With<FormCore>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut form_query: Query<&mut Handle<StandardMaterial>, With<FormCore>>,
+) {
+    // Update core form scale and color based on audio
+    if let Ok(mut transform) = query.get_single_mut() {
+        let scale = 0.5 * (1.8 + state.audio_data.kick_energy * 1.7);
+        transform.scale = Vec3::splat(scale);
+    }
 
-    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
-    let h_prime = h / 60.0;
-    let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
+    // Update core form color
+    if let Ok(material_handle) = form_query.get_single_mut() {
+        if let Some(material) = materials.get_mut(material_handle.as_ref()) {
+            let (r, g, b) = if state.audio_data.kick_onset {
+                (1.0, 0.0, 1.0)
+            } else {
+                let energy = state.audio_data.total_energy.min(1.0);
+                (energy * 0.8, 0.0, energy)
+            };
 
-    let (r1, g1, b1) = match h_prime as i32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-
-    let m = l - c / 2.0;
-    ((r1 + m).clamp(0.0, 1.0), (g1 + m).clamp(0.0, 1.0), (b1 + m).clamp(0.0, 1.0))
+            material.base_color = Color::srgba(r, g, b, 0.8);
+            material.emissive = Color::srgb(r * 0.5, g * 0.5, b * 0.5).into();
+        }
+    }
 }
