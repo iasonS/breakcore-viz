@@ -1,0 +1,48 @@
+[audio]
+fft_size = 2048
+kick_band_lo = 1
+kick_band_hi = 50
+mid_band_lo = 50
+mid_band_hi = 300
+hat_band_lo = 300
+hat_band_hi = 2000
+kick_onset_threshold = 0.15
+hat_onset_threshold = 0.10
+kick_energy_threshold = 0.4
+hat_energy_threshold = 0.3
+
+[renderer]
+width = 1280
+height = 720
+fov = 45.0
+raymarching_steps = 120
+raymarching_max_distance = 70.0
+raymarching_surface_distance = 0.0055
+
+[particles]
+max_particles = 3000
+kick_spawn_count = 80
+hat_spawn_count = 60
+peak_spawn_count = 30
+
+[effects]
+glitch_base_duration = 18
+glitch_intensity_decay = 0.80
+bloom_threshold = 0.5
+bloom_intensity = 0.3
+feedback_scale = 0.965
+feedback_decay = 0.52
+
+[camera]
+base_z = 5.0
+energy_zoom_scale = 2.8
+chaos_zoom_scale = 1.2
+shake_kick_amplitude = 1.2
+shake_chaos_amplitude = 0.3
+
+[colors]
+kick_hue = 310.0
+hue_saturation = 100.0
+hue_lightness = 58.0
+hat_hue_offset = 180.0
+hat_lightness = 60.0

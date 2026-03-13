@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  breakcore-viz:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:3000"
+    volumes:
+      - ./assets:/app/assets:ro
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
