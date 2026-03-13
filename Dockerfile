@@ -9,6 +9,7 @@ COPY Cargo.* ./
 # Copy source
 COPY src ./src
 COPY assets ./assets
+COPY web ./web
 
 # Build
 RUN cargo build --release
@@ -25,8 +26,9 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /build/target/release/breakcore_viz /app/breakcore-viz
 
-# Copy assets
+# Copy assets and web files
 COPY assets ./assets
+COPY web ./web
 
 EXPOSE 3000
 
