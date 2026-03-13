@@ -1,14 +1,15 @@
 # BREAKCORE VISUALIZER
-## Rust + Bevy Implementation
+## Rust + WASM Implementation
 
 Real-time audio visualizer optimized for breakcore music (160-300 BPM, dense transients, chaotic layering).
 
 ### Architecture
 
-- **Bevy ECS**: Entity-component-system framework for game/graphics applications
-- **WGSL Shaders**: WebGPU shading language for raymarching, bloom, and feedback effects
-- **Web Audio API**: Via wasm-bindgen for WASM target
-- **WASM Deployment**: Compiles to WebAssembly for browser
+- **HTTP Server** (Rust): Serves web UI and WASM artifacts (port 3000)
+- **WASM Visualizer** (WebAssembly): Browser-based visualization with WebGL/Canvas
+- **Web Audio API**: Real-time audio analysis from file upload or microphone
+- **Particle System**: Physics-based particles with trails and color mapping
+- **Audio Analysis**: Per-band energy tracking, onset detection, spectral centroid
 
 ### Features
 
@@ -24,34 +25,46 @@ Real-time audio visualizer optimized for breakcore music (160-300 BPM, dense tra
 ✅ Violent camera shake on transients
 ✅ Data-driven config (TOML parameters)
 
-### Building
+### Quick Start
 
+**Docker (recommended):**
 ```bash
+docker-compose up
+# Visit http://localhost:8080
+```
+
+**From source:**
+```bash
+# Build WASM visualizer
+./build-wasm.sh
+
+# Run HTTP server (serves web UI + WASM)
 cargo build --release
+./target/release/breakcore_viz
+# Visit http://localhost:3000
 ```
 
-For WASM (browser):
-```bash
-cargo install wasm-pack
-wasm-pack build --target web --release
-```
-
-### Structure
+### File Structure
 
 ```
-src/
-├── main.rs          # Bevy app setup + main loop
-├── audio.rs         # Audio analysis (FFT, onsets, centroid)
-├── particles.rs     # Particle system + physics
-├── renderer.rs      # Raymarching core + framebuffer management
-└── effects.rs       # Glitch, bloom, feedback
-
-assets/
-├── shaders/
-│   ├── core.wgsl    # Raymarched twisted form
-│   ├── bloom.wgsl   # Gaussian blur + glow
-│   └── feedback.wgsl # Recursive frame composition
-└── config.toml      # Tunable parameters
+breakcore-viz/
+├── src/
+│   ├── main.rs           # HTTP server + WASM entry point
+│   ├── audio.rs          # Audio analysis logic
+│   ├── particles.rs      # Particle system
+│   ├── renderer.rs       # Render state management
+│   ├── effects.rs        # Effect engines (glitch, bloom, feedback)
+│   └── wasm_app.rs       # WASM module for browser
+├── web/
+│   ├── index.html        # Web UI with audio controls
+│   └── pkg/              # Built WASM artifacts (generated)
+├── assets/
+│   ├── config.toml       # Tunable parameters
+│   └── shaders/          # WGSL shaders (for future raymarching)
+├── Dockerfile            # Multi-stage Docker build
+├── docker-compose.yml    # Service orchestration
+├── build-wasm.sh         # WASM build script
+└── deploy.sh             # Server deployment helper
 ```
 
 ### Parameters

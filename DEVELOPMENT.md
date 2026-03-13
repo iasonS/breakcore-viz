@@ -1,37 +1,61 @@
 # Development Guide
 
+## Architecture
+
+The visualizer consists of two components:
+
+1. **Native HTTP Server** (Rust native)
+   - Serves web UI (index.html)
+   - Serves WASM artifacts from `/pkg` directory
+   - Provides health check and API endpoints
+   - Runs on port 3000
+
+2. **WASM Visualizer** (WebAssembly)
+   - Browser-based audio visualization
+   - Uses Web Audio API for audio analysis
+   - WebGL/Canvas for rendering
+   - Loaded dynamically from `/pkg` directory
+
 ## Quick Start
 
+### Build Native Server
 ```bash
-cd breakcore-viz
 cargo build --release
+# Binary: target/release/breakcore_viz
 ```
 
-## Development Workflow
-
-### 1. Running Locally
-```bash
-cargo run
-```
-
-### 2. Building for Browser (WASM)
+### Build WASM Visualizer
 ```bash
 chmod +x build-wasm.sh
+./build-wasm.sh
+# Output: web/pkg/
+```
+
+### Run Locally
+
+**Option 1: Native + WASM (Full)**
+```bash
+# First build WASM
+./build-wasm.sh
+
+# Then run native server
+cargo run --release
+
+# Visit http://localhost:3000
+```
+
+**Option 2: WASM Only (Browser)
+```bash
 ./build-wasm.sh
 cd web
 python3 -m http.server 8000
 # Visit http://localhost:8000
 ```
 
-### 3. Building Docker Image
-```bash
-docker build -t breakcore-viz .
-docker run -p 8080:3000 breakcore-viz
-```
-
-Or with docker-compose:
+**Option 3: Docker**
 ```bash
 docker-compose up
+# Visit http://localhost:8080
 ```
 
 ## Modifying Parameters
