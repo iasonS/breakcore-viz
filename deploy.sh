@@ -5,9 +5,6 @@ set -e
 
 echo "=== Breakcore Visualizer Deployment ==="
 echo ""
-echo "This script deploys the visualizer to your server."
-echo "Usage: ./deploy.sh [server-user@server-host]"
-echo ""
 
 if [ -z "$1" ]; then
     echo "Default deployment to tt@192.168.1.9"
@@ -21,7 +18,6 @@ DEPLOY_DIR="/home/tt/breakcore-viz"
 echo "Deploying to: $SERVER:$DEPLOY_DIR"
 echo ""
 
-# Check if we can reach the server
 if ! ssh "$SERVER" "echo 'Connection OK'" > /dev/null 2>&1; then
     echo "ERROR: Cannot connect to $SERVER"
     echo "Make sure you can SSH to the server first."
@@ -36,17 +32,13 @@ rsync -avz --delete \
     --exclude='target' \
     --exclude='.git' \
     --exclude='node_modules' \
-    --exclude='*.lock' \
     . "$SERVER:$DEPLOY_DIR/"
 
-# Ensure web directory is synced (rsync sometimes skips empty dirs)
-rsync -avz web/ "$SERVER:$DEPLOY_DIR/web/"
-
 echo "[3/4] Building Docker image..."
-ssh "$SERVER" "cd $DEPLOY_DIR && docker build --no-cache -t breakcore-viz:latest ."
+ssh "$SERVER" "cd $DEPLOY_DIR && docker compose build --no-cache"
 
 echo "[4/4] Starting Docker container..."
-ssh "$SERVER" "cd $DEPLOY_DIR && docker-compose down || true && docker-compose up -d"
+ssh "$SERVER" "cd $DEPLOY_DIR && docker compose down || true && docker compose up -d"
 
 echo ""
 echo "=== Deployment Complete ==="
