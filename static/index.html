@@ -6,7 +6,7 @@
 <title>BREAKCORE VISUALIZER</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#000;overflow:hidden;cursor:none}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
 canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 #overlay{z-index:2;pointer-events:none}
 #hud{position:fixed;top:16px;left:16px;z-index:10;color:#0f0;font:11px/1.5 'Courier New',monospace;
@@ -35,37 +35,91 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
   <div id="hud-band">K:0 S:0 H:0</div>
   <div id="hud-particles">P: 0</div>
 </div>
-<div id="drop-zone"><div>DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen</small></div></div>
+<div id="drop-zone"><div>DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small></div></div>
 <div id="error"></div>
 
 <script>
 "use strict";
 
+// ─── Configuration ──────────────────────────────────────────────────
+const CFG = {
+  // Audio
+  fftSize: 2048,
+  smoothAlpha: 0.15,
+  bandRanges: { sub: [20, 100], low: [100, 500], mid: [500, 2000], high: [2000, 16000] },
+  bandMultipliers: { kick: 3, snare: 2.5, hat: 4 },
+
+  // Particles
+  maxParticles: 800,
+  spawn: {
+    kick:  { count: [30, 50], speed: [200, 600], size: [4, 9], life: [1.0, 1.8], gravity: 400 },
+    snare: { count: [20, 35], speed: [250, 650], size: [2, 5], life: [0.5, 0.9], gravity: 200 },
+    hat:   { count: [25, 40], speed: [350, 850], size: [1.5, 3.5], life: [0.3, 0.6], gravity: 0 },
+    peak:  { count: [40, 70], speed: [300, 900], size: [3, 7], life: [0.8, 1.6], gravity: 300 },
+  },
+  onsetThresholds: { kick: 0.015, snare: 0.012, hat: 0.008, peak: 0.03 },
+  peakEnergyMin: 0.6,
+
+  // Overlay
+  numBars: 64,
+  numStars: 300,
+  maxRings: 8,
+  maxTears: 12,
+  numTendrils: 16,
+
+  // Visual evolution
+  phaseDuration: 20,
+  shapeDuration: 45, // seconds per shape before morphing
+  morphDuration: 5,  // seconds to morph between shapes
+  numShapes: 4,      // protein, crystal, jellyfish, blackhole
+
+  // Camera modes
+  camera: {
+    modeDuration: 8,    // seconds per camera mode before eligible for switch
+    modes: ['orbit', 'closeup', 'wide', 'side', 'topdown'],
+  },
+
+  // Shader tuning
+  scene: {
+    steps: 44, maxDist: 25.0, surfThreshold: 0.015,
+    torusMajorR: 1.2, tubeR: 0.45,
+    camOrbitSpeed: 0.4, camBaseDist: 4.0, camEnergyDist: 1.5,
+  },
+  post: {
+    bloomThreshold: 0.5, bloomIntensity: 1.2, bloomKickBoost: 0.25,
+    feedbackZoom: 0.97, feedbackDecay: 0.85, feedbackBlend: 0.35,
+    vignetteStrength: 0.45, toneMapCompression: 0.25, saturationBoost: 1.25,
+    maxBrightness: 0.93,
+  },
+
+  // HUD
+  debugMode: new URLSearchParams(window.location.search).has('debug'),
+};
+
+// ─── Error Handling ─────────────────────────────────────────────────
 const errorEl = document.getElementById('error');
-function showError(msg) { console.error(msg); errorEl.style.display = 'block'; errorEl.textContent += msg + '\n'; }
+function showError(msg) {
+  console.error(msg);
+  errorEl.style.display = 'block';
+  errorEl.textContent += msg + '\n';
+}
 
-// ─── Constants ───────────────────────────────────────────────────────
-const FFTSIZE = 2048;
-const SMOOTH_ALPHA = 0.15;
-const MAX_PARTICLES = 800;
-const NUM_BARS = 64; // frequency bars per side
-
-// ─── DOM ─────────────────────────────────────────────────────────────
+// ─── DOM ────────────────────────────────────────────────────────────
 const glCanvas = document.getElementById('gl');
 const ovCanvas = document.getElementById('overlay');
 const ctx = ovCanvas.getContext('2d');
 const hud = document.getElementById('hud');
 const dropZone = document.getElementById('drop-zone');
 
-// ─── WebGL2 ──────────────────────────────────────────────────────────
-const gl = glCanvas.getContext('webgl2', {antialias: false, alpha: false});
+// ─── WebGL2 ─────────────────────────────────────────────────────────
+const gl = glCanvas.getContext('webgl2', { antialias: false, alpha: false });
 if (!gl) { showError('WebGL2 not supported'); throw 'no webgl2'; }
 const floatExt = gl.getExtension('EXT_color_buffer_float');
 gl.getExtension('OES_texture_float_linear');
 const FB_INT = floatExt ? gl.RGBA16F : gl.RGBA8;
 const FB_TYPE = floatExt ? gl.FLOAT : gl.UNSIGNED_BYTE;
 
-// ─── Shaders ─────────────────────────────────────────────────────────
+// ─── Shaders ────────────────────────────────────────────────────────
 const FULLSCREEN_VS = `#version 300 es
 precision highp float;
 out vec2 vUV;
@@ -81,19 +135,20 @@ precision highp float;
 in vec2 vUV;
 out vec4 fragColor;
 
-uniform float uTime, uEnergy, uKick, uSnare, uHat, uChaos, uHue;
-uniform vec2 uRes;
+uniform float uTime, uEnergy, uKick, uSnare, uHat, uChaos, uHue, uMorph;
+uniform float uCamDist, uCamHeight, uCamOrbitSpd, uCamFov;
+uniform int uShapeA, uShapeB;
+uniform vec2 uRes, uMouse;
 
-#define STEPS 44
-#define MAX_DIST 25.0
-#define SURF 0.015
+#define STEPS ${CFG.scene.steps}
+#define MAX_DIST ${CFG.scene.maxDist.toFixed(1)}
+#define SURF ${CFG.scene.surfThreshold.toFixed(3)}
 
 vec3 hsl(float h, float s, float l) {
   vec3 c = clamp(abs(mod(h*6.0+vec3(0,4,2),6.0)-3.0)-1.0,0.0,1.0);
   return l+s*(c-0.5)*(1.0-abs(2.0*l-1.0));
 }
 
-// Main torus-knot (the protein)
 float torusSDF(vec3 p) {
   float twist = uTime * 2.0 + uEnergy * 3.0 + uChaos * 2.0;
   float convulse = sin(twist * 6.0) * uChaos * 0.3;
@@ -101,84 +156,141 @@ float torusSDF(vec3 p) {
   pp.x += convulse + sin(pp.y * 3.0 + twist) * uEnergy * 0.25;
   pp.y += sin(pp.z * 2.5 + twist) * uEnergy * 0.2;
   pp.z += cos(pp.x * 2.0 + twist * 1.2) * uEnergy * 0.2;
-  float r = length(pp.xy) - 1.2;
+  float r = length(pp.xy) - ${CFG.scene.torusMajorR.toFixed(1)};
   float y2 = pp.z - 0.5 * sin(atan(pp.y, pp.x) * 5.0 + twist);
-  float d = sqrt(r * r + y2 * y2) - 0.45;
+  float d = sqrt(r * r + y2 * y2) - ${CFG.scene.tubeR.toFixed(2)};
   d += 0.06 * sin(pp.x*12.0+twist) * sin(pp.y*12.0) * sin(pp.z*12.0) * uEnergy;
   d += 0.03 * sin(pp.x*25.0) * sin(pp.y*25.0) * sin(pp.z*25.0) * uChaos;
   return d;
 }
 
-// Orbiting satellite spheres — each band drives one
+// Crystal / Octahedron SDF
+float crystalSDF(vec3 p) {
+  float twist = uTime * 1.5 + uEnergy * 2.0;
+  vec3 pp = p;
+  // Slow rotation
+  float c = cos(twist * 0.3), s = sin(twist * 0.3);
+  pp.xz = mat2(c, s, -s, c) * pp.xz;
+  pp.xy = mat2(cos(twist*0.2), sin(twist*0.2), -sin(twist*0.2), cos(twist*0.2)) * pp.xy;
+  // Octahedron: |x|+|y|+|z| = r
+  float d = (abs(pp.x) + abs(pp.y) + abs(pp.z) - 1.3) * 0.577;
+  // Audio-reactive facet displacement
+  d += 0.08 * sin(pp.x*8.0+twist*2.0) * sin(pp.y*8.0) * uEnergy;
+  d += 0.04 * sin(pp.z*15.0+twist) * uChaos;
+  return d;
+}
+
+// Jellyfish SDF — dome + tendrils
+float jellyfishSDF(vec3 p) {
+  float twist = uTime * 1.8 + uEnergy * 2.5;
+  vec3 pp = p;
+  pp.y += 0.3;
+  // Dome (sphere with bottom cut)
+  float dome = length(pp) - 1.2;
+  dome = max(dome, pp.y - 0.3); // cut bottom
+  // Pulse the dome
+  dome += 0.1 * sin(atan(pp.z, pp.x) * 6.0 + twist) * uKick;
+  // Tendrils below
+  float ty = pp.y + 0.5;
+  if (ty < 0.0) {
+    float tendrilAngle = atan(pp.z, pp.x);
+    float tendrilR = length(pp.xz);
+    float wave = sin(tendrilAngle * 5.0 + twist * 2.0) * 0.15 + sin(ty * 8.0 - twist * 3.0) * 0.1;
+    float tendril = tendrilR - (0.3 + wave) * exp(ty * 0.8);
+    dome = min(dome, tendril);
+  }
+  dome += 0.05 * sin(pp.x*10.0+twist) * sin(pp.z*10.0) * uEnergy;
+  return dome;
+}
+
+// Black hole with accretion disk SDF
+float blackholeSDF(vec3 p) {
+  float twist = uTime * 2.5 + uEnergy * 3.0;
+  vec3 pp = p;
+  // Event horizon (sphere)
+  float hole = length(pp) - 0.4;
+  // Accretion disk (torus, flat and wide)
+  float diskR = length(pp.xz) - 1.5;
+  float disk = sqrt(diskR * diskR + pp.y * pp.y) - 0.08;
+  // Warp disk with audio
+  disk += 0.06 * sin(atan(pp.z, pp.x) * 8.0 + twist * 3.0) * uEnergy;
+  disk += 0.03 * sin(length(pp.xz) * 12.0 - twist * 4.0) * uKick;
+  // Gravitational lensing warp
+  float r = length(pp);
+  float warp = 0.3 / (r * r + 0.1);
+  pp.y += warp * sin(twist);
+  return min(hole, disk);
+}
+
+// Select shape by index
+float shapeSDF(vec3 p, int idx) {
+  if (idx == 0) return torusSDF(p);
+  if (idx == 1) return crystalSDF(p);
+  if (idx == 2) return jellyfishSDF(p);
+  return blackholeSDF(p);
+}
+
+// Morphed main shape
+float mainSDF(vec3 p) {
+  float a = shapeSDF(p, uShapeA);
+  float b = shapeSDF(p, uShapeB);
+  return mix(a, b, uMorph);
+}
+
 float satelliteSDF(vec3 p) {
   float t = uTime;
-  // Kick satellite — big, slow orbit
   float a1 = t * 1.5;
   vec3 c1 = vec3(cos(a1)*2.5, sin(a1*0.8)*0.8, sin(a1)*2.5);
   float s1 = length(p - c1) - (0.12 + uKick * 0.25);
-  // Snare satellite — medium, faster orbit
   float a2 = t * 2.3 + 2.094;
   vec3 c2 = vec3(cos(a2)*2.2, sin(a2*1.2)*1.0, sin(a2)*2.2);
   float s2 = length(p - c2) - (0.08 + uSnare * 0.18);
-  // Hat satellite — small, fast orbit
   float a3 = t * 3.7 + 4.189;
   vec3 c3 = vec3(cos(a3)*2.8, sin(a3*1.5)*0.6, sin(a3)*2.8);
   float s3 = length(p - c3) - (0.05 + uHat * 0.12);
   return min(s1, min(s2, s3));
 }
 
-// Background grid — infinite grid plane fading into distance
 float gridLines(vec2 uv, float t) {
   vec2 g = abs(fract(uv * 8.0 + t * 0.3) - 0.5);
-  float lines = min(g.x, g.y);
-  return smoothstep(0.0, 0.04, lines);
+  return smoothstep(0.0, 0.04, min(g.x, g.y));
 }
 
-float sceneSDF(vec3 p) {
-  return min(torusSDF(p), satelliteSDF(p));
-}
+float sceneSDF(vec3 p) { return min(mainSDF(p), satelliteSDF(p)); }
 
 void main() {
   vec2 uv = (vUV * 2.0 - 1.0) * vec2(uRes.x / uRes.y, 1.0);
 
-  // Camera shake
   vec3 shake = vec3(
     sin(uTime*45.0)*uKick*0.3, cos(uTime*38.0)*uKick*0.2,
     sin(uTime*25.0)*uChaos*0.1
   );
 
-  float angle = uTime * 0.4;
-  float camDist = 4.0 + uEnergy * 1.5;
-  vec3 ro = vec3(sin(angle)*camDist, cos(angle*0.7)*1.5, cos(angle)*camDist) + shake;
+  float angle = uTime * uCamOrbitSpd;
+  float camDist = uCamDist + uEnergy * 1.5;
+  vec2 mOff = (uMouse - 0.5) * 1.5;
+  vec3 ro = vec3(sin(angle)*camDist + mOff.x, cos(angle*0.7)*uCamHeight - mOff.y * 0.8, cos(angle)*camDist) + shake;
   vec3 fwd = normalize(-ro);
   vec3 right = normalize(cross(fwd, vec3(0,1,0)));
   vec3 up = cross(right, fwd);
-  vec3 rd = normalize(fwd + uv.x * right + uv.y * up);
+  vec3 rd = normalize(fwd * uCamFov + uv.x * right + uv.y * up);
 
-  // ── Background: receding grid tunnel ──
+  // Background grids
   vec3 bgCol = vec3(0.0);
-  {
-    // Project a grid onto a virtual plane behind the scene
-    float gridT = (-8.0 - ro.z) / rd.z;
-    if (gridT > 0.0) {
-      vec3 gp = ro + rd * gridT;
-      float g = 1.0 - gridLines(gp.xy, uTime);
-      float fade = exp(-gridT * 0.03);
-      vec3 gridColor = hsl(uHue/360.0, 0.9, 0.4) * (0.25 + uEnergy * 0.5);
-      bgCol += gridColor * g * fade;
-    }
-    // Second grid plane (floor)
-    float floorT = (-3.0 - ro.y) / rd.y;
-    if (floorT > 0.0 && floorT < 30.0) {
-      vec3 fp = ro + rd * floorT;
-      float g = 1.0 - gridLines(fp.xz, uTime * 0.5);
-      float fade = exp(-floorT * 0.05);
-      vec3 floorCol = hsl(310.0/360.0, 0.8, 0.35) * (0.15 + uKick * 0.4);
-      bgCol += floorCol * g * fade;
-    }
+  float gridT = (-8.0 - ro.z) / rd.z;
+  if (gridT > 0.0) {
+    vec3 gp = ro + rd * gridT;
+    float g = 1.0 - gridLines(gp.xy, uTime);
+    bgCol += hsl(uHue/360.0, 0.9, 0.4) * (0.25 + uEnergy * 0.5) * g * exp(-gridT * 0.03);
+  }
+  float floorT = (-3.0 - ro.y) / rd.y;
+  if (floorT > 0.0 && floorT < 30.0) {
+    vec3 fp = ro + rd * floorT;
+    float g = 1.0 - gridLines(fp.xz, uTime * 0.5);
+    bgCol += hsl(310.0/360.0, 0.8, 0.35) * (0.15 + uKick * 0.4) * g * exp(-floorT * 0.05);
   }
 
-  // ── Raymarch ──
+  // Raymarch
   float dist = 0.0, minDist = 999.0;
   bool hit = false;
   vec3 p;
@@ -191,51 +303,47 @@ void main() {
     if (dist > MAX_DIST) break;
   }
 
-  // Color palette
-  vec3 kickCol = hsl(310.0/360.0, 1.0, 0.5);
-  vec3 hueCol = hsl(uHue/360.0, 1.0, 0.55);
-  vec3 hatCol = hsl(fract(uHue/360.0+0.5), 1.0, 0.55);
-  vec3 snareCol = hsl(fract(uHue/360.0+0.25), 0.8, 0.7);
+  vec3 kickCol = hsl(310.0/360.0, 1.0, 0.55);
+  vec3 hueCol = hsl(uHue/360.0, 1.0, 0.5);
+  vec3 hatCol = hsl(fract(uHue/360.0+0.5), 1.0, 0.5);
+  vec3 snareCol = hsl(fract(uHue/360.0+0.25), 1.0, 0.55);
 
   vec3 col = bgCol;
 
   if (hit) {
-    // Determine which object was hit
-    float dTorus = torusSDF(p);
+    float dMain = mainSDF(p);
     float dSat = satelliteSDF(p);
 
     vec3 surfCol;
-    if (abs(dTorus) < abs(dSat)) {
-      surfCol = mix(kickCol, hueCol, 0.5 + uHat * 0.5);
-      surfCol = mix(surfCol, hatCol, uChaos * 0.3);
+    if (abs(dMain) < abs(dSat)) {
+      float posHue = sin(p.x * 2.0 + uTime) * 0.15 + sin(p.z * 3.0 - uTime * 0.7) * 0.1;
+      surfCol = hsl(fract(uHue/360.0 + posHue), 1.0, 0.5);
+      surfCol = mix(surfCol, kickCol, 0.3 + uKick * 0.2);
+      surfCol = mix(surfCol, hatCol, uHat * 0.25);
+      surfCol = pow(surfCol, vec3(0.85));
     } else {
       surfCol = mix(snareCol, kickCol, uKick * 0.5);
       surfCol = mix(surfCol, hatCol, uHat * 0.5);
+      surfCol = pow(surfCol, vec3(0.8));
     }
 
-    // Vivid lighting — preserve color at all energy levels
-    float glow = 2.2 / (1.0 + dist * dist * 0.12);
-    // Darken center at high energy to preserve structure
-    float structureBoost = mix(1.0, 0.7, uEnergy * uEnergy);
-    col += surfCol * glow * (0.8 + uKick * 0.4) * structureBoost;
-    // Add colored rim light instead of flat brightness
+    float glow = 2.5 / (1.0 + dist * dist * 0.12);
+    float structureBoost = mix(1.0, 0.75, uEnergy * uEnergy);
+    col += surfCol * glow * (0.9 + uKick * 0.4) * structureBoost;
+
     vec3 rimCol = mix(hatCol, kickCol, 0.5 + 0.5*sin(uTime));
-    float rim = smoothstep(0.01, 0.08, abs(torusSDF(p)));
-    col += rimCol * rim * 0.4 * (1.0 + uKick * 0.5);
-    col += kickCol * uKick * 0.2;
-    col += hatCol * uHat * 0.12;
+    float rim = smoothstep(0.01, 0.08, abs(mainSDF(p)));
+    col += rimCol * rim * 0.5 * (1.0 + uKick * 0.5);
+    col += kickCol * uKick * 0.25;
+    col += hatCol * uHat * 0.15;
   }
 
-  // Glow halo — neon rim, visible but not blinding
-  float nearGlow = 0.05 / (0.01 + minDist * minDist);
-  nearGlow = min(nearGlow, 0.8);
-  vec3 glowColor = mix(kickCol, hatCol, 0.5 + 0.5 * sin(uTime * 0.5));
-  col += glowColor * nearGlow * (0.2 + uEnergy * 0.3);
+  // Glow halo
+  float nearGlow = min(0.05 / (0.01 + minDist * minDist), 0.8);
+  col += mix(kickCol, hatCol, 0.5 + 0.5 * sin(uTime * 0.5)) * nearGlow * (0.2 + uEnergy * 0.3);
 
-  // Scanlines
+  // Scanlines + vignette
   col *= 1.0 - 0.06 * step(0.5, fract(gl_FragCoord.y * 0.5)) * (1.0 + uChaos);
-
-  // Vignette
   col *= 1.0 - dot(vUV*2.0-1.0, vUV*2.0-1.0) * 0.25;
 
   fragColor = vec4(col, 1.0);
@@ -246,18 +354,70 @@ precision highp float;
 in vec2 vUV;
 out vec4 fragColor;
 uniform sampler2D uScene, uPrev;
-uniform float uTime, uEnergy, uKick, uChaos;
+uniform float uTime, uEnergy, uKick, uChaos, uPhase;
 uniform vec2 uRes;
 
+// Film grain noise
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+// CRT barrel distortion
+vec2 crtDistort(vec2 uv) {
+  vec2 cc = uv - 0.5;
+  float d = dot(cc, cc) * 0.08;
+  return uv + cc * d;
+}
+
+// Color grading — blend between palettes based on phase
+vec3 colorGrade(vec3 col, float phase) {
+  float p = mod(phase, 4.0);
+  vec3 tint;
+  float strength;
+
+  if (p < 1.0) {
+    // Phase 0: Cyberpunk (pink highlights, cyan shadows)
+    float lum = dot(col, vec3(0.299, 0.587, 0.114));
+    vec3 shadows = vec3(0.1, 0.4, 0.5);
+    vec3 highlights = vec3(1.0, 0.3, 0.6);
+    tint = mix(shadows, highlights, lum);
+    strength = 0.15;
+  } else if (p < 2.0) {
+    // Phase 1: Acid green / toxic
+    tint = mix(col, col * vec3(0.6, 1.2, 0.4), 0.3);
+    return mix(col, tint, 0.5);
+  } else if (p < 3.0) {
+    // Phase 2: Deep blue / cold
+    float lum = dot(col, vec3(0.299, 0.587, 0.114));
+    vec3 shadows = vec3(0.05, 0.1, 0.3);
+    vec3 highlights = vec3(0.7, 0.8, 1.0);
+    tint = mix(shadows, highlights, lum);
+    strength = 0.2;
+  } else {
+    // Phase 3: Warm fire / orange
+    tint = mix(col, col * vec3(1.3, 0.8, 0.4), 0.3);
+    return mix(col, tint, 0.4);
+  }
+  return mix(col, tint, strength);
+}
+
 void main() {
-  vec2 uv = vUV;
+  // CRT barrel distortion
+  vec2 uv = crtDistort(vUV);
+
+  // Discard pixels outside the curved screen
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+
   float ca = 0.002 + uChaos * 0.005 + uKick * 0.006;
   vec3 col;
   col.r = texture(uScene, uv + vec2(ca, 0.0)).r;
   col.g = texture(uScene, uv).g;
   col.b = texture(uScene, uv - vec2(ca, 0.0)).b;
 
-  // Bloom 7-tap — threshold higher to avoid white-out
+  // Bloom
   vec3 bloom = vec3(0.0); float total = 0.0;
   for (int i = -3; i <= 3; i++) {
     float w = exp(-float(i*i)/4.5);
@@ -265,182 +425,321 @@ void main() {
     bloom += texture(uScene, uv + vec2(0.0, float(i)/uRes.y*5.0)).rgb * w;
     total += w * 2.0;
   }
-  bloom = max(bloom/total - 0.5, 0.0) * 1.2;
-  col += bloom * (0.2 + uKick * 0.25);
+  bloom = max(bloom/total - ${CFG.post.bloomThreshold.toFixed(1)}, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
+  col += bloom * (0.2 + uKick * ${CFG.post.bloomKickBoost.toFixed(2)});
 
-  // Feedback trail — decay harder so brightness doesn't accumulate
-  vec3 prev = texture(uPrev, (uv - 0.5) * 0.97 + 0.5).rgb * 0.85;
-  col = mix(col, prev, 0.35);
+  // Feedback trail
+  vec2 prevUV = crtDistort((vUV - 0.5) * ${CFG.post.feedbackZoom.toFixed(2)} + 0.5);
+  vec3 prev = texture(uPrev, prevUV).rgb * ${CFG.post.feedbackDecay.toFixed(2)};
+  col = mix(col, prev, ${CFG.post.feedbackBlend.toFixed(2)});
 
   // VHS glitch
   if (uChaos > 0.4) {
     float strip = step(0.97, fract(sin(floor(uv.y*uRes.y*0.05+uTime*30.0)*43758.5453)));
     float disp = strip * sin(uTime*100.0) * 0.02 * uChaos;
-    vec3 d; d.r=texture(uScene,uv+vec2(disp+ca,0)).r; d.g=texture(uScene,uv+vec2(disp,0)).g; d.b=texture(uScene,uv+vec2(disp-ca,0)).b;
+    vec3 d;
+    d.r = texture(uScene, uv + vec2(disp+ca, 0)).r;
+    d.g = texture(uScene, uv + vec2(disp, 0)).g;
+    d.b = texture(uScene, uv + vec2(disp-ca, 0)).b;
     col = mix(col, d.gbr, strip * uChaos * 0.7);
   }
 
-  // Flash on kick — tinted, not white
-  vec3 flashCol = vec3(1.0, 0.3, 0.6);
-  col += flashCol * smoothstep(0.8,1.0,uKick) * 0.12;
-  // Stronger vignette to keep edges dark
-  col *= 1.0 - length(vUV*2.0-1.0) * 0.45;
-  // Tone map — preserve color saturation, only compress extremes
-  col = col / (1.0 + col * 0.3);
-  col = min(col, vec3(0.92));
+  // Kick flash (tinted)
+  col += vec3(1.0, 0.3, 0.6) * smoothstep(0.8, 1.0, uKick) * 0.12;
+
+  // Color grading based on evolution phase
+  col = colorGrade(col, uPhase);
+
+  // Film grain — subtle noise, stronger at high chaos
+  float grain = hash(uv * uRes + fract(uTime * 100.0)) - 0.5;
+  col += grain * (0.03 + uChaos * 0.04);
+
+  // CRT scanlines (stronger than scene scanlines)
+  float scanline = sin(gl_FragCoord.y * 1.5) * 0.5 + 0.5;
+  col *= 0.92 + scanline * 0.08;
+
+  // RGB subpixel pattern (subtle CRT phosphor look)
+  float px = mod(gl_FragCoord.x, 3.0);
+  vec3 subpx = vec3(
+    smoothstep(0.0, 1.0, 1.0 - abs(px - 0.5)),
+    smoothstep(0.0, 1.0, 1.0 - abs(px - 1.5)),
+    smoothstep(0.0, 1.0, 1.0 - abs(px - 2.5))
+  );
+  col = mix(col, col * subpx, 0.1);
+
+  // Vignette — stronger at edges for CRT tube look
+  vec2 vig = vUV * 2.0 - 1.0;
+  float vigF = 1.0 - dot(vig, vig) * ${CFG.post.vignetteStrength.toFixed(2)};
+  // CRT corner darkening
+  vigF *= 1.0 - pow(max(abs(vig.x), abs(vig.y)), 8.0) * 0.3;
+  col *= vigF;
+
+  // Tone map + saturation boost
+  col = col / (1.0 + col * ${CFG.post.toneMapCompression.toFixed(2)});
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(lum), col, ${CFG.post.saturationBoost.toFixed(2)});
+  col = clamp(col, 0.0, ${CFG.post.maxBrightness.toFixed(2)});
+
   fragColor = vec4(col, 1.0);
 }`;
 
-// ─── Compile & Link ──────────────────────────────────────────────────
-function comp(src,t){const s=gl.createShader(t);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){showError(gl.getShaderInfoLog(s));return null}return s}
-function link(v,f){const p=gl.createProgram();gl.attachShader(p,comp(v,gl.VERTEX_SHADER));gl.attachShader(p,comp(f,gl.FRAGMENT_SHADER));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS)){showError(gl.getProgramInfoLog(p));return null}return p}
-const sceneProg=link(FULLSCREEN_VS,SCENE_FS), postProg=link(FULLSCREEN_VS,POST_FS);
-if(!sceneProg||!postProg) throw 'Shader fail';
-function ulocs(p,ns){const o={};for(const n of ns)o[n]=gl.getUniformLocation(p,n);return o}
-const sceneU=ulocs(sceneProg,['uTime','uEnergy','uKick','uSnare','uHat','uChaos','uHue','uRes']);
-const postU=ulocs(postProg,['uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes']);
-const emptyVAO=gl.createVertexArray();
-
-// ─── Framebuffers ────────────────────────────────────────────────────
-let screenW=0,screenH=0,sceneW=0,sceneH=0;
-const sceneFB={fb:null,tex:null}, ppFB=[{fb:null,tex:null},{fb:null,tex:null}];
-let ppIdx=0;
-function mkFB(w,h){
-  const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
-  gl.texImage2D(gl.TEXTURE_2D,0,FB_INT,w,h,0,gl.RGBA,FB_TYPE,null);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-  const fb=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,fb);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,tex,0);
-  return{fb,tex};
-}
-function rebuildFBs(){
-  const w=glCanvas.width,h=glCanvas.height;
-  if(w===screenW&&h===screenH)return;
-  screenW=w;screenH=h;sceneW=Math.floor(w/2);sceneH=Math.floor(h/2);
-  for(const o of[sceneFB,ppFB[0],ppFB[1]]){if(o.fb)gl.deleteFramebuffer(o.fb);if(o.tex)gl.deleteTexture(o.tex)}
-  Object.assign(sceneFB,mkFB(sceneW,sceneH));
-  Object.assign(ppFB[0],mkFB(w,h));Object.assign(ppFB[1],mkFB(w,h));
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+// ─── Compile & Link ─────────────────────────────────────────────────
+function compileShader(src, type) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    showError('Shader compile error:\n' + gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
 }
 
-// ─── Audio Engine ────────────────────────────────────────────────────
-let audioCtx=null,analyser=null,sourceNode=null,audioEl=null;
-let isPlaying=false,isPaused=false;
-let freqData,timeData;
-const bands={sub:0,low:0,mid:0,high:0};
-const prevBands={sub:0,low:0,mid:0,high:0};
-const bandPeaks={sub:0,low:0,mid:0,high:0};
-let spectralCentroid=1000,chaosMetric=0,cumulativeHue=0;
-const onsetTimes=[];
-// Smoothed frequency bars for visualization
-const smoothBars = new Float32Array(NUM_BARS);
+function linkProgram(vsSrc, fsSrc) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compileShader(vsSrc, gl.VERTEX_SHADER));
+  gl.attachShader(p, compileShader(fsSrc, gl.FRAGMENT_SHADER));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    showError('Program link error:\n' + gl.getProgramInfoLog(p));
+    return null;
+  }
+  return p;
+}
 
-function initAudio(){
-  if(audioCtx)return;
-  audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  analyser=audioCtx.createAnalyser();
-  analyser.fftSize=FFTSIZE;analyser.smoothingTimeConstant=0.4;
-  analyser.minDecibels=-90;analyser.maxDecibels=-10;
-  analyser.connect(audioCtx.destination);
-  freqData=new Uint8Array(analyser.frequencyBinCount);
-  timeData=new Uint8Array(analyser.frequencyBinCount);
+const sceneProg = linkProgram(FULLSCREEN_VS, SCENE_FS);
+const postProg = linkProgram(FULLSCREEN_VS, POST_FS);
+if (!sceneProg || !postProg) throw 'Shader compilation failed';
+
+function getUniforms(prog, names) {
+  const u = {};
+  for (const n of names) u[n] = gl.getUniformLocation(prog, n);
+  return u;
 }
-function binForHz(hz){return Math.round(hz/(audioCtx.sampleRate/FFTSIZE))}
-function bandEnergy(lo,hi){
-  const a=Math.max(0,binForHz(lo)),b=Math.min(binForHz(hi),freqData.length-1);
-  if(b<a)return 0;let s=0;for(let i=a;i<=b;i++)s+=freqData[i];return s/((b-a+1)*255);
+
+const sceneU = getUniforms(sceneProg, ['uTime','uEnergy','uKick','uSnare','uHat','uChaos','uHue','uRes','uMorph','uShapeA','uShapeB','uMouse','uCamDist','uCamHeight','uCamOrbitSpd','uCamFov']);
+const postU = getUniforms(postProg, ['uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes','uPhase']);
+const emptyVAO = gl.createVertexArray();
+
+// ─── Framebuffers ───────────────────────────────────────────────────
+let screenW = 0, screenH = 0, sceneW = 0, sceneH = 0;
+const sceneFB = { fb: null, tex: null };
+const ppFB = [{ fb: null, tex: null }, { fb: null, tex: null }];
+let ppIdx = 0;
+
+function createFBO(w, h) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, FB_INT, w, h, 0, gl.RGBA, FB_TYPE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  return { fb, tex };
 }
-function processAudio(){
-  if(!analyser||!isPlaying)return;
+
+function rebuildFBs() {
+  const w = glCanvas.width, h = glCanvas.height;
+  if (w === screenW && h === screenH) return;
+  screenW = w; screenH = h;
+  sceneW = Math.floor(w / 2); sceneH = Math.floor(h / 2);
+  for (const o of [sceneFB, ppFB[0], ppFB[1]]) {
+    if (o.fb) gl.deleteFramebuffer(o.fb);
+    if (o.tex) gl.deleteTexture(o.tex);
+  }
+  Object.assign(sceneFB, createFBO(sceneW, sceneH));
+  Object.assign(ppFB[0], createFBO(w, h));
+  Object.assign(ppFB[1], createFBO(w, h));
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+// ─── Audio Engine ───────────────────────────────────────────────────
+let audioCtx = null, analyser = null, sourceNode = null, audioEl = null;
+let isPlaying = false, isPaused = false;
+let freqData, timeData;
+const bands = { sub: 0, low: 0, mid: 0, high: 0 };
+const prevBands = { sub: 0, low: 0, mid: 0, high: 0 };
+const bandPeaks = { sub: 0, low: 0, mid: 0, high: 0 };
+let spectralCentroid = 1000, chaosMetric = 0, cumulativeHue = 0;
+const onsetTimes = [];
+const smoothBars = new Float32Array(CFG.numBars);
+
+function initAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = CFG.fftSize;
+    analyser.smoothingTimeConstant = 0.4;
+    analyser.minDecibels = -90;
+    analyser.maxDecibels = -10;
+    analyser.connect(audioCtx.destination);
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    timeData = new Uint8Array(analyser.frequencyBinCount);
+  } catch (e) {
+    showError('Audio init failed: ' + e.message);
+  }
+}
+
+function binForHz(hz) { return Math.round(hz / (audioCtx.sampleRate / CFG.fftSize)); }
+
+function bandEnergy(lo, hi) {
+  const a = Math.max(0, binForHz(lo));
+  const b = Math.min(binForHz(hi), freqData.length - 1);
+  if (b < a) return 0;
+  let s = 0;
+  for (let i = a; i <= b; i++) s += freqData[i];
+  return s / ((b - a + 1) * 255);
+}
+
+function totalEnergy() {
+  return Math.min(1, (bands.sub + bands.low + bands.mid + bands.high) / 2);
+}
+
+function processAudio() {
+  if (!analyser || !isPlaying) return;
   analyser.getByteFrequencyData(freqData);
   analyser.getByteTimeDomainData(timeData);
-  const raw={sub:bandEnergy(20,100),low:bandEnergy(100,500),mid:bandEnergy(500,2000),high:bandEnergy(2000,16000)};
-  for(const k of['sub','low','mid','high']){
-    prevBands[k]=bands[k];bands[k]+=(raw[k]-bands[k])*SMOOTH_ALPHA;
-    const delta=bands[k]-prevBands[k];
-    if(delta>bandPeaks[k]*0.3+0.005){bandPeaks[k]=Math.max(bandPeaks[k],bands[k]);onsetTimes.push(performance.now())}
-    bandPeaks[k]*=0.995;
-  }
-  let num=0,den=0;
-  for(let i=0;i<freqData.length;i++){const m=freqData[i]/255;num+=i*audioCtx.sampleRate/FFTSIZE*m;den+=m}
-  spectralCentroid=den>0.01?num/den:1000;
-  cumulativeHue+=totalEnergy()*0.5;
-  const now=performance.now();
-  while(onsetTimes.length&&onsetTimes[0]<now-1000)onsetTimes.shift();
-  chaosMetric=Math.min(1,onsetTimes.length/30);
 
-  // Build smoothed frequency bars (log-spaced)
-  for (let i = 0; i < NUM_BARS; i++) {
-    // Log frequency mapping: more bars for low freqs
-    const f0 = Math.floor(Math.pow(i / NUM_BARS, 2) * freqData.length);
-    const f1 = Math.floor(Math.pow((i + 1) / NUM_BARS, 2) * freqData.length);
+  const br = CFG.bandRanges;
+  const raw = {
+    sub: bandEnergy(...br.sub), low: bandEnergy(...br.low),
+    mid: bandEnergy(...br.mid), high: bandEnergy(...br.high),
+  };
+
+  for (const k of ['sub', 'low', 'mid', 'high']) {
+    prevBands[k] = bands[k];
+    bands[k] += (raw[k] - bands[k]) * CFG.smoothAlpha;
+    const delta = bands[k] - prevBands[k];
+    if (delta > bandPeaks[k] * 0.3 + 0.005) {
+      bandPeaks[k] = Math.max(bandPeaks[k], bands[k]);
+      onsetTimes.push(performance.now());
+    }
+    bandPeaks[k] *= 0.995;
+  }
+
+  let num = 0, den = 0;
+  for (let i = 0; i < freqData.length; i++) {
+    const m = freqData[i] / 255;
+    num += i * audioCtx.sampleRate / CFG.fftSize * m;
+    den += m;
+  }
+  spectralCentroid = den > 0.01 ? num / den : 1000;
+  cumulativeHue += totalEnergy() * 0.5;
+
+  const now = performance.now();
+  while (onsetTimes.length && onsetTimes[0] < now - 1000) onsetTimes.shift();
+  chaosMetric = Math.min(1, onsetTimes.length / 30);
+
+  // Log-spaced frequency bars
+  for (let i = 0; i < CFG.numBars; i++) {
+    const f0 = Math.floor(Math.pow(i / CFG.numBars, 2) * freqData.length);
+    const f1 = Math.floor(Math.pow((i + 1) / CFG.numBars, 2) * freqData.length);
     let sum = 0, count = 0;
     for (let j = f0; j < f1 && j < freqData.length; j++) { sum += freqData[j]; count++; }
     const val = count > 0 ? sum / count / 255 : 0;
     smoothBars[i] += (val - smoothBars[i]) * 0.3;
   }
 }
-function totalEnergy(){return Math.min(1,(bands.sub+bands.low+bands.mid+bands.high)/2)}
 
-// ─── Particle Pool ───────────────────────────────────────────────────
-const pool=new Array(MAX_PARTICLES);
-for(let i=0;i<MAX_PARTICLES;i++)pool[i]={alive:false,x:0,y:0,vx:0,vy:0,hue:0,size:0,life:0,maxLife:0,gravity:0};
-function spawnOne(x,y,vx,vy,hue,size,life,grav){
-  for(let i=0;i<MAX_PARTICLES;i++){const p=pool[i];if(!p.alive){p.alive=true;p.x=x;p.y=y;p.vx=vx;p.vy=vy;p.hue=hue;p.size=size;p.life=life;p.maxLife=life;p.gravity=grav;return}}
+// ─── Particle Pool ──────────────────────────────────────────────────
+const pool = new Array(CFG.maxParticles);
+for (let i = 0; i < CFG.maxParticles; i++) {
+  pool[i] = { alive: false, x: 0, y: 0, vx: 0, vy: 0, hue: 0, size: 0, life: 0, maxLife: 0, gravity: 0 };
 }
-function spawnBurst(type,count,hue){
-  const cx=window.innerWidth/2,cy=window.innerHeight/2;
-  for(let i=0;i<count;i++){
-    const a=Math.random()*Math.PI*2;let spd,sz,life,grav;
-    switch(type){
-      case'kick':spd=200+Math.random()*400;sz=4+Math.random()*5;life=1.0+Math.random()*0.8;grav=400;break;
-      case'snare':spd=250+Math.random()*400;sz=2+Math.random()*3;life=0.5+Math.random()*0.4;grav=200;break;
-      case'hat':spd=350+Math.random()*500;sz=1.5+Math.random()*2;life=0.3+Math.random()*0.3;grav=0;break;
-      case'peak':spd=300+Math.random()*600;sz=3+Math.random()*4;life=0.8+Math.random()*0.8;grav=300;break;
+
+function spawnOne(x, y, vx, vy, hue, size, life, grav) {
+  for (let i = 0; i < CFG.maxParticles; i++) {
+    const p = pool[i];
+    if (!p.alive) {
+      p.alive = true; p.x = x; p.y = y; p.vx = vx; p.vy = vy;
+      p.hue = hue; p.size = size; p.life = life; p.maxLife = life; p.gravity = grav;
+      return;
     }
-    spawnOne(cx+Math.cos(a)*10,cy+Math.sin(a)*10,Math.cos(a)*spd,Math.sin(a)*spd,hue+Math.random()*40-20,sz,life,grav);
   }
 }
-let prevKick=0,prevSnare=0,prevHat=0;
-function updateSpawns(){
-  if(!isPlaying)return;
-  const kd=bands.sub-prevKick,sd=bands.low-prevSnare,hd=bands.high-prevHat,e=totalEnergy();
-  if(kd>0.015){spawnBurst('kick',30+Math.floor(Math.random()*20),310);spawnRing(310);if(Math.random()<0.4)spawnTear()}
-  if(sd>0.012){spawnBurst('snare',20+Math.floor(Math.random()*15),0);if(sd>0.03)spawnRing(0)}
-  if(hd>0.008)spawnBurst('hat',25+Math.floor(Math.random()*15),(spectralCentroid-200)/3800*360+180);
-  if(e>0.6&&kd>0.03){spawnBurst('peak',40+Math.floor(Math.random()*30),Math.random()*360);spawnRing(Math.random()*360);spawnTear();if(Math.random()<0.3)spawnTear()}
-  prevKick=bands.sub;prevSnare=bands.low;prevHat=bands.high;
+
+function rand(min, max) { return min + Math.random() * (max - min); }
+
+function spawnBurst(type, hue) {
+  const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+  const cfg = CFG.spawn[type];
+  const count = Math.floor(rand(...cfg.count));
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const spd = rand(...cfg.speed);
+    spawnOne(
+      cx + Math.cos(a) * 10, cy + Math.sin(a) * 10,
+      Math.cos(a) * spd, Math.sin(a) * spd,
+      hue + rand(-20, 20), rand(...cfg.size), rand(...cfg.life), cfg.gravity
+    );
+  }
 }
 
-// ─── Shock Rings (expand outward on kicks) ─────────────────────────
-const MAX_RINGS = 8;
+let prevKick = 0, prevSnare = 0, prevHat = 0;
+
+function updateSpawns() {
+  if (!isPlaying) return;
+  const kd = bands.sub - prevKick;
+  const sd = bands.low - prevSnare;
+  const hd = bands.high - prevHat;
+  const e = totalEnergy();
+  const th = CFG.onsetThresholds;
+  const hueVal = (spectralCentroid - 200) / 3800 * 360 + 180;
+
+  if (kd > th.kick) {
+    spawnBurst('kick', 310);
+    spawnRing(310);
+    if (Math.random() < 0.4) spawnTear();
+  }
+  if (sd > th.snare) {
+    spawnBurst('snare', 0);
+    if (sd > 0.03) spawnRing(0);
+  }
+  if (hd > th.hat) spawnBurst('hat', hueVal);
+  if (e > CFG.peakEnergyMin && kd > th.peak) {
+    spawnBurst('peak', Math.random() * 360);
+    spawnRing(Math.random() * 360);
+    spawnTear();
+    if (Math.random() < 0.3) spawnTear();
+  }
+
+  prevKick = bands.sub; prevSnare = bands.low; prevHat = bands.high;
+}
+
+// ─── Shock Rings ────────────────────────────────────────────────────
 const shockRings = [];
+
 function spawnRing(hue) {
-  shockRings.push({ r: 0, maxR: Math.min(window.innerWidth, window.innerHeight) * 0.6, life: 1.0, hue, speed: 400 + Math.random() * 300 });
-  if (shockRings.length > MAX_RINGS) shockRings.shift();
+  shockRings.push({
+    r: 0,
+    maxR: Math.min(window.innerWidth, window.innerHeight) * 0.6,
+    life: 1.0, hue,
+    speed: 400 + Math.random() * 300,
+  });
+  if (shockRings.length > CFG.maxRings) shockRings.shift();
 }
 
 // ─── Starfield ──────────────────────────────────────────────────────
-const NUM_STARS = 300;
 const stars = [];
-for (let i = 0; i < NUM_STARS; i++) {
+for (let i = 0; i < CFG.numStars; i++) {
   stars.push({
     angle: Math.random() * Math.PI * 2,
     dist: 0.1 + Math.random() * 0.9,
     speed: 0.02 + Math.random() * 0.1,
     size: 1.0 + Math.random() * 2.5,
-    hue: Math.random() * 360
+    hue: Math.random() * 360,
   });
 }
 
-// ─── Reality Tears (glitch rips in the background) ──────────────────
-const MAX_TEARS = 12;
+// ─── Reality Tears ──────────────────────────────────────────────────
 const tears = [];
+
 function spawnTear() {
-  const side = Math.random() < 0.5 ? -1 : 1; // left or right
+  const side = Math.random() < 0.5 ? -1 : 1;
   tears.push({
     x: window.innerWidth * (0.5 + side * (0.25 + Math.random() * 0.25)),
     y: window.innerHeight * (0.1 + Math.random() * 0.8),
@@ -450,17 +749,38 @@ function spawnTear() {
     maxLife: 0.3 + Math.random() * 0.5,
     hue: Math.random() * 360,
     drift: (Math.random() - 0.5) * 60,
-    jagged: Math.random() < 0.5, // jagged vs smooth tear
+    jagged: Math.random() < 0.5,
   });
-  if (tears.length > MAX_TEARS) tears.shift();
+  if (tears.length > CFG.maxTears) tears.shift();
 }
 
-// ─── Visual Evolution State ─────────────────────────────────────────
-let evolutionPhase = 0; // rotates through visual modes over time
+// ─── Visual Evolution ───────────────────────────────────────────────
+let evolutionPhase = 0;
 let phaseTimer = 0;
-const PHASE_DURATION = 20; // seconds per phase
 
-// ─── Spinning Wireframe Shapes ──────────────────────────────────────
+// Camera mode state
+let camMode = 0; // index into CFG.camera.modes
+let camModeTimer = 0;
+let camTransition = 0; // 0-1, blend between old and new camera
+let camPrevMode = 0;
+const camSmooth = { dist: 4.0, height: 1.5, orbitSpeed: 0.4, fovMul: 1.0 };
+
+// Mouse tracking
+let mouseX = 0.5, mouseY = 0.5; // normalized 0-1
+let smoothMouseX = 0.5, smoothMouseY = 0.5;
+document.addEventListener('mousemove', e => {
+  mouseX = e.clientX / window.innerWidth;
+  mouseY = e.clientY / window.innerHeight;
+});
+
+// Shape morphing state
+let currentShape = 0;
+let nextShape = 1;
+let shapeTimer = 0;
+let morphProgress = 0; // 0 = fully currentShape, 1 = fully nextShape
+let isMorphing = false;
+
+// ─── Canvas 2D Helpers ──────────────────────────────────────────────
 function drawPolygon(cx, cy, r, sides, rotation, color, alpha, lineW) {
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = color;
@@ -478,16 +798,21 @@ function drawPolygon(cx, cy, r, sides, rotation, color, alpha, lineW) {
 
 // ─── Canvas 2D Overlay ──────────────────────────────────────────────
 let overlayTime = 0;
+
 function drawOverlay(dt, W, H, energy, kick, hue) {
   ctx.clearRect(0, 0, W, H);
   overlayTime += dt;
   const cx = W / 2, cy = H / 2;
 
-  // ── Starfield (always visible, pulses with energy) ──
-  const starBaseSpeed = 0.3 + energy * 2.0;
+  // Starfield
+  const starSpeed = 0.3 + energy * 2.0;
   for (const s of stars) {
-    s.dist += s.speed * starBaseSpeed * dt;
-    if (s.dist > 1.2) { s.dist = 0.05; s.angle = Math.random() * Math.PI * 2; s.hue = hue + Math.random() * 60; }
+    s.dist += s.speed * starSpeed * dt;
+    if (s.dist > 1.2) {
+      s.dist = 0.05;
+      s.angle = Math.random() * Math.PI * 2;
+      s.hue = hue + Math.random() * 60;
+    }
     const x = cx + Math.cos(s.angle) * s.dist * W * 0.55;
     const y = cy + Math.sin(s.angle) * s.dist * H * 0.55;
     const alpha = Math.min(1, s.dist * 2) * (0.4 + energy * 0.6);
@@ -499,34 +824,31 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
   ctx.globalAlpha = 1;
 
   if (isPlaying && freqData) {
-    // ── Side Frequency Bars (left + right, mirrored) ──
+    // Side Frequency Bars
     const barH = H * 0.6;
-    const gap = 2;
     const startY = H * 0.2;
-
-    for (let i = 0; i < NUM_BARS; i++) {
+    for (let i = 0; i < CFG.numBars; i++) {
       const v = smoothBars[i];
-      const yPos = startY + i * (barH / NUM_BARS);
+      const yPos = startY + i * (barH / CFG.numBars);
       const barLen = v * W * 0.12;
-      const barHue = 310 - i * (310 / NUM_BARS) + (hue * 0.3);
-      const sat = i > NUM_BARS * 0.8 ? 60 : 100;
+      const barHue = 310 - i * (310 / CFG.numBars) + (hue * 0.3);
+      const sat = i > CFG.numBars * 0.8 ? 60 : 100;
       const lit = 40 + v * 30;
       ctx.fillStyle = `hsla(${barHue},${sat}%,${lit}%,${0.5 + v * 0.5})`;
-      ctx.fillRect(0, yPos, barLen, Math.max(1, barH / NUM_BARS - gap));
-      ctx.fillRect(W - barLen, yPos, barLen, Math.max(1, barH / NUM_BARS - gap));
+      ctx.fillRect(0, yPos, barLen, Math.max(1, barH / CFG.numBars - 2));
+      ctx.fillRect(W - barLen, yPos, barLen, Math.max(1, barH / CFG.numBars - 2));
     }
 
-    // ── Circular Spectrum Ring ──
+    // Circular Spectrum Ring
     const ringR = Math.min(W, H) * 0.28;
-    const ringBars = 128;
     ctx.lineWidth = 2;
-    for (let i = 0; i < ringBars; i++) {
-      const idx = Math.floor(Math.pow(i / ringBars, 1.5) * freqData.length);
+    for (let i = 0; i < 128; i++) {
+      const idx = Math.floor(Math.pow(i / 128, 1.5) * freqData.length);
       const v = freqData[Math.min(idx, freqData.length - 1)] / 255;
-      const angle = (i / ringBars) * Math.PI * 2 - Math.PI / 2;
+      const angle = (i / 128) * Math.PI * 2 - Math.PI / 2;
       const inner = ringR - 5;
       const outer = ringR + v * ringR * 0.5;
-      const rHue = (hue + i * (360 / ringBars)) % 360;
+      const rHue = (hue + i * (360 / 128)) % 360;
       ctx.strokeStyle = `hsla(${rHue},100%,${50 + v * 30}%,${0.3 + v * 0.6})`;
       ctx.beginPath();
       ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
@@ -534,27 +856,25 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       ctx.stroke();
     }
 
-    // ── Spinning Wireframe Shapes (corners + mid-sides, reactive) ──
+    // Spinning Wireframe Shapes
     const shapes = [
-      { x: W * 0.13, y: H * 0.18, sides: 5, rMul: 1.2, speed: 0.7, band: bands.sub },
-      { x: W * 0.87, y: H * 0.18, sides: 3, rMul: 1.0, speed: -1.1, band: bands.low },
-      { x: W * 0.13, y: H * 0.82, sides: 6, rMul: 1.1, speed: 0.9, band: bands.mid },
-      { x: W * 0.87, y: H * 0.82, sides: 4, rMul: 0.9, speed: -0.8, band: bands.high },
-      // Extra mid-edge shapes
-      { x: W * 0.06, y: H * 0.5, sides: 7, rMul: 0.8, speed: 0.5, band: (bands.sub + bands.low) / 2 },
-      { x: W * 0.94, y: H * 0.5, sides: 8, rMul: 0.7, speed: -0.6, band: (bands.mid + bands.high) / 2 },
+      { x: W*0.13, y: H*0.18, sides: 5, rMul: 1.2, speed: 0.7,  band: bands.sub },
+      { x: W*0.87, y: H*0.18, sides: 3, rMul: 1.0, speed: -1.1, band: bands.low },
+      { x: W*0.13, y: H*0.82, sides: 6, rMul: 1.1, speed: 0.9,  band: bands.mid },
+      { x: W*0.87, y: H*0.82, sides: 4, rMul: 0.9, speed: -0.8, band: bands.high },
+      { x: W*0.06, y: H*0.5,  sides: 7, rMul: 0.8, speed: 0.5,  band: (bands.sub + bands.low) / 2 },
+      { x: W*0.94, y: H*0.5,  sides: 8, rMul: 0.7, speed: -0.6, band: (bands.mid + bands.high) / 2 },
     ];
     for (const sh of shapes) {
       const r = (40 + sh.band * 80) * sh.rMul;
       const rot = overlayTime * sh.speed;
       const shHue = (hue + sh.sides * 50) % 360;
-      // 3 nested wireframes for depth
       drawPolygon(sh.x, sh.y, r, sh.sides, rot, `hsl(${shHue},100%,60%)`, 0.3 + sh.band * 0.5, 2);
-      drawPolygon(sh.x, sh.y, r * 0.65, sh.sides, -rot * 1.3, `hsl(${(shHue+40)%360},80%,50%)`, 0.2 + sh.band * 0.4, 1.5);
-      drawPolygon(sh.x, sh.y, r * 0.35, sh.sides, rot * 2, `hsl(${(shHue+80)%360},90%,55%)`, 0.15 + sh.band * 0.3, 1);
+      drawPolygon(sh.x, sh.y, r*0.65, sh.sides, -rot*1.3, `hsl(${(shHue+40)%360},80%,50%)`, 0.2 + sh.band * 0.4, 1.5);
+      drawPolygon(sh.x, sh.y, r*0.35, sh.sides, rot*2, `hsl(${(shHue+80)%360},90%,55%)`, 0.15 + sh.band * 0.3, 1);
     }
 
-    // ── Bass Pulse Arcs (bottom half, kick-reactive) ──
+    // Bass Pulse Arcs
     const bassR = Math.min(W, H) * 0.45;
     const bassKick = bands.sub;
     for (let i = 0; i < 3; i++) {
@@ -565,22 +885,16 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       ctx.globalAlpha = 0.15 + bassKick * 0.5;
       ctx.strokeStyle = `hsl(${arcHue},100%,55%)`;
       ctx.lineWidth = 2 + bassKick * 4;
-      ctx.beginPath();
-      ctx.arc(cx, cy + H * 0.1, arcR, arcStart, arcEnd);
-      ctx.stroke();
-      // Mirror to left
-      ctx.beginPath();
-      ctx.arc(cx, cy + H * 0.1, arcR, Math.PI + (Math.PI - arcEnd), Math.PI + (Math.PI - arcStart));
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy + H * 0.1, arcR, arcStart, arcEnd); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy + H * 0.1, arcR, Math.PI + (Math.PI - arcEnd), Math.PI + (Math.PI - arcStart)); ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
-    // ── Energy Tendrils (radiating lines, mid-reactive) ──
-    const numTendrils = 16;
+    // Energy Tendrils
     const midBand = bands.mid;
     ctx.lineWidth = 1;
-    for (let i = 0; i < numTendrils; i++) {
-      const a = (i / numTendrils) * Math.PI * 2 + overlayTime * 0.3;
+    for (let i = 0; i < CFG.numTendrils; i++) {
+      const a = (i / CFG.numTendrils) * Math.PI * 2 + overlayTime * 0.3;
       const len = 80 + midBand * 200 + Math.sin(overlayTime * 3 + i) * 30;
       const startR = Math.min(W, H) * 0.25;
       ctx.globalAlpha = 0.1 + midBand * 0.3;
@@ -592,103 +906,85 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
     }
     ctx.globalAlpha = 1;
 
-    // ── Shock Rings (expanding on kicks) — thicker, longer-lasting ──
+    // Shock Rings
     for (let i = shockRings.length - 1; i >= 0; i--) {
       const ring = shockRings[i];
       ring.r += ring.speed * dt;
-      ring.life -= dt * 1.0; // slower decay
+      ring.life -= dt;
       if (ring.life <= 0) { shockRings.splice(i, 1); continue; }
       ctx.globalAlpha = ring.life * 0.7;
       ctx.strokeStyle = `hsl(${ring.hue},100%,65%)`;
-      ctx.lineWidth = 3 + ring.life * 5; // thicker
-      ctx.beginPath();
-      ctx.arc(cx, cy, ring.r, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.lineWidth = 3 + ring.life * 5;
+      ctx.beginPath(); ctx.arc(cx, cy, ring.r, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
 
-  // ── Reality Tears (glitch rips) ──
+  // Reality Tears
   for (let i = tears.length - 1; i >= 0; i--) {
     const t = tears[i];
     t.life -= dt;
     t.y += t.drift * dt;
     if (t.life <= 0) { tears.splice(i, 1); continue; }
-    const alpha = (t.life / t.maxLife);
-    const flicker = Math.random() > 0.3 ? 1 : 0; // glitchy flicker
+    const alpha = t.life / t.maxLife;
+    if (Math.random() < 0.3) continue; // glitchy flicker
 
-    if (flicker) {
-      ctx.globalAlpha = alpha * 0.8;
-      // Main tear — bright colored slit
-      ctx.fillStyle = `hsl(${t.hue},100%,70%)`;
-      if (t.jagged) {
-        // Jagged tear: multiple offset segments
-        for (let s = 0; s < 5; s++) {
-          const segY = t.y - t.h/2 + s * (t.h/5);
-          const offX = (Math.random() - 0.5) * 15;
-          ctx.fillRect(t.x + offX, segY, t.w * (0.5 + Math.random()), t.h/5 - 1);
-        }
-      } else {
-        ctx.fillRect(t.x, t.y - t.h/2, t.w, t.h);
+    ctx.globalAlpha = alpha * 0.8;
+    ctx.fillStyle = `hsl(${t.hue},100%,70%)`;
+    if (t.jagged) {
+      for (let s = 0; s < 5; s++) {
+        const segY = t.y - t.h/2 + s * (t.h/5);
+        ctx.fillRect(t.x + (Math.random()-0.5)*15, segY, t.w * (0.5+Math.random()), t.h/5 - 1);
       }
-      // White-hot core
-      ctx.globalAlpha = alpha * 0.5;
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(t.x + t.w * 0.3, t.y - t.h * 0.4, t.w * 0.4, t.h * 0.8);
-      // Chromatic bleed on sides
-      ctx.globalAlpha = alpha * 0.3;
-      ctx.fillStyle = `hsl(${(t.hue + 120) % 360},100%,60%)`;
-      ctx.fillRect(t.x - 4, t.y - t.h * 0.3, 3, t.h * 0.6);
-      ctx.fillStyle = `hsl(${(t.hue + 240) % 360},100%,60%)`;
-      ctx.fillRect(t.x + t.w + 1, t.y - t.h * 0.3, 3, t.h * 0.6);
+    } else {
+      ctx.fillRect(t.x, t.y - t.h/2, t.w, t.h);
     }
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(t.x + t.w*0.3, t.y - t.h*0.4, t.w*0.4, t.h*0.8);
+    ctx.globalAlpha = alpha * 0.3;
+    ctx.fillStyle = `hsl(${(t.hue+120)%360},100%,60%)`;
+    ctx.fillRect(t.x - 4, t.y - t.h*0.3, 3, t.h*0.6);
+    ctx.fillStyle = `hsl(${(t.hue+240)%360},100%,60%)`;
+    ctx.fillRect(t.x + t.w + 1, t.y - t.h*0.3, 3, t.h*0.6);
   }
   ctx.globalAlpha = 1;
 
-  // ── Visual Evolution (phase shifts over time) ──
+  // Visual Evolution
   if (isPlaying) {
     phaseTimer += dt;
-    if (phaseTimer > PHASE_DURATION) { phaseTimer = 0; evolutionPhase = (evolutionPhase + 1) % 4; }
-    const phaseProg = phaseTimer / PHASE_DURATION;
+    if (phaseTimer > CFG.phaseDuration) {
+      phaseTimer = 0;
+      evolutionPhase = (evolutionPhase + 1) % 4;
+    }
+    const energy = totalEnergy();
 
-    // Phase-specific overlays
     if (evolutionPhase === 1 || evolutionPhase === 3) {
-      // Scanning horizontal lines
       const numLines = 5 + Math.floor(energy * 10);
       ctx.lineWidth = 1;
       for (let i = 0; i < numLines; i++) {
         const ly = (overlayTime * 40 + i * (H / numLines)) % H;
         ctx.globalAlpha = 0.06 + energy * 0.08;
         ctx.strokeStyle = `hsl(${(hue + i * 20) % 360},60%,50%)`;
-        ctx.beginPath();
-        ctx.moveTo(0, ly);
-        ctx.lineTo(W, ly);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W, ly); ctx.stroke();
       }
     }
     if (evolutionPhase === 2 || evolutionPhase === 3) {
-      // Diagonal cross-hatch pattern
       ctx.lineWidth = 0.5;
       ctx.globalAlpha = 0.04 + energy * 0.06;
       ctx.strokeStyle = `hsl(${hue},40%,40%)`;
       const spacing = 40 - energy * 15;
       for (let i = -W; i < W + H; i += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(i, 0);
-        ctx.lineTo(i + H, H);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(i + H, 0);
-        ctx.lineTo(i, H);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + H, H); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(i + H, 0); ctx.lineTo(i, H); ctx.stroke();
       }
     }
     ctx.globalAlpha = 1;
   }
 
-  // ── Particles ──
+  // Particles
   let aliveCount = 0;
-  for (let i = 0; i < MAX_PARTICLES; i++) {
+  for (let i = 0; i < CFG.maxParticles; i++) {
     const p = pool[i];
     if (!p.alive) continue;
     aliveCount++;
@@ -705,108 +1001,230 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
   return aliveCount;
 }
 
-// ─── Resize ──────────────────────────────────────────────────────────
-function resize(){
-  const w=window.innerWidth,h=window.innerHeight;
-  glCanvas.width=w;glCanvas.height=h;
-  const dpr=Math.min(window.devicePixelRatio,2);
-  ovCanvas.width=Math.floor(w*dpr);ovCanvas.height=Math.floor(h*dpr);
-  glCanvas.style.width=ovCanvas.style.width=w+'px';
-  glCanvas.style.height=ovCanvas.style.height=h+'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  gl.viewport(0,0,w,h);rebuildFBs();
+// ─── Resize ─────────────────────────────────────────────────────────
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  glCanvas.width = w; glCanvas.height = h;
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  ovCanvas.width = Math.floor(w * dpr);
+  ovCanvas.height = Math.floor(h * dpr);
+  glCanvas.style.width = ovCanvas.style.width = w + 'px';
+  glCanvas.style.height = ovCanvas.style.height = h + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  gl.viewport(0, 0, w, h);
+  rebuildFBs();
 }
-resize();window.addEventListener('resize',resize);
+resize();
+window.addEventListener('resize', resize);
 
-// ─── HUD ─────────────────────────────────────────────────────────────
-let hudTimer=999;
-function showHUD(){hud.classList.remove('hidden');hudTimer=999}
-showHUD();
+// ─── HUD ────────────────────────────────────────────────────────────
+let showDebug = CFG.debugMode;
+if (!showDebug) hud.classList.add('hidden');
 
-// ─── Audio Loading ───────────────────────────────────────────────────
-function loadAudio(file){
+// ─── Audio Loading ──────────────────────────────────────────────────
+function loadAudio(file) {
   initAudio();
-  if(sourceNode){sourceNode.disconnect();sourceNode=null}
-  if(audioEl){audioEl.pause();audioEl.remove()}
-  audioEl=new Audio();audioEl.crossOrigin='anonymous';
-  audioEl.src=URL.createObjectURL(file);audioEl.loop=true;
-  sourceNode=audioCtx.createMediaElementSource(audioEl);
+  if (!audioCtx) return;
+  if (sourceNode) { sourceNode.disconnect(); sourceNode = null; }
+  if (audioEl) { audioEl.pause(); audioEl.remove(); }
+  audioEl = new Audio();
+  audioEl.crossOrigin = 'anonymous';
+  audioEl.src = URL.createObjectURL(file);
+  audioEl.loop = true;
+  sourceNode = audioCtx.createMediaElementSource(audioEl);
   sourceNode.connect(analyser);
-  if(audioCtx.state==='suspended')audioCtx.resume();
-  audioEl.play().then(()=>{isPlaying=true;isPaused=false;dropZone.classList.add('hidden');showHUD()}).catch(e=>showError('Play failed: '+e.message));
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  audioEl.play().then(() => {
+    isPlaying = true; isPaused = false;
+    dropZone.classList.add('hidden');
+  }).catch(e => showError('Play failed: ' + e.message));
 }
-document.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation()});
-document.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();const f=e.dataTransfer.files[0];if(f)loadAudio(f)});
-dropZone.addEventListener('click',()=>{const i=document.createElement('input');i.type='file';i.accept='audio/*';i.onchange=()=>{if(i.files[0])loadAudio(i.files[0])};i.click()});
 
-// ─── Keyboard ────────────────────────────────────────────────────────
-document.addEventListener('keydown',e=>{
-  if(e.code==='Space'){e.preventDefault();if(!audioEl)return;if(isPaused){audioEl.play();isPaused=false;isPlaying=true}else{audioEl.pause();isPaused=true;isPlaying=false}}
-  if(e.code==='KeyF'){if(!document.fullscreenElement)document.documentElement.requestFullscreen();else document.exitFullscreen()}
+document.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+document.addEventListener('drop', e => {
+  e.preventDefault(); e.stopPropagation();
+  const f = e.dataTransfer.files[0];
+  if (f) loadAudio(f);
 });
-document.addEventListener('click',e=>{if(e.target===glCanvas||e.target===ovCanvas)if(!document.fullscreenElement)document.documentElement.requestFullscreen().catch(()=>{})});
+dropZone.addEventListener('click', () => {
+  const i = document.createElement('input');
+  i.type = 'file'; i.accept = 'audio/*';
+  i.onchange = () => { if (i.files[0]) loadAudio(i.files[0]); };
+  i.click();
+});
 
-// ─── Render ──────────────────────────────────────────────────────────
-function tri(){gl.bindVertexArray(emptyVAO);gl.drawArrays(gl.TRIANGLES,0,3)}
-let lastTime=0,fpsFrames=0,fpsTime=0,fpsDisplay=0;
-const t0=performance.now()/1000;
+// ─── Keyboard ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!audioEl) return;
+    if (isPaused) { audioEl.play(); isPaused = false; isPlaying = true; }
+    else { audioEl.pause(); isPaused = true; isPlaying = false; }
+  }
+  if (e.code === 'KeyF') {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  }
+  if (e.code === 'KeyD') {
+    showDebug = !showDebug;
+    hud.classList.toggle('hidden', !showDebug);
+  }
+});
 
-function frame(nowMs){
+document.addEventListener('click', e => {
+  if (e.target === glCanvas || e.target === ovCanvas) {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+  }
+});
+
+// ─── Render Loop ────────────────────────────────────────────────────
+function drawFullscreenTriangle() {
+  gl.bindVertexArray(emptyVAO);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+let lastTime = 0, fpsFrames = 0, fpsTime = 0, fpsDisplay = 0;
+const t0 = performance.now() / 1000;
+
+function frame(nowMs) {
   requestAnimationFrame(frame);
-  const t=nowMs/1000,dt=Math.min(t-(lastTime||t),0.05);lastTime=t;
-  fpsFrames++;fpsTime+=dt;
-  if(fpsTime>=0.5){fpsDisplay=Math.round(fpsFrames/fpsTime);fpsFrames=0;fpsTime=0}
+  const t = nowMs / 1000;
+  const dt = Math.min(t - (lastTime || t), 0.05);
+  lastTime = t;
+  fpsFrames++; fpsTime += dt;
+  if (fpsTime >= 0.5) {
+    fpsDisplay = Math.round(fpsFrames / fpsTime);
+    fpsFrames = 0; fpsTime = 0;
+  }
 
-  processAudio();updateSpawns();
+  processAudio();
+  updateSpawns();
 
-  const energy=totalEnergy();
-  const kick=Math.min(1,bands.sub*3),snare=Math.min(1,bands.low*2.5),hat=Math.min(1,bands.high*4);
-  const chaos=chaosMetric,hue=((cumulativeHue*20+spectralCentroid*0.1)%360+360)%360;
-  const time=t-t0;
+  // Smooth mouse tracking
+  smoothMouseX += (mouseX - smoothMouseX) * 3.0 * dt;
+  smoothMouseY += (mouseY - smoothMouseY) * 3.0 * dt;
+
+  // Camera mode switching — triggered by beats or timer
+  camModeTimer += dt;
+  camTransition = Math.min(1, camTransition + dt * 3.0); // 0.33s transition
+
+  // Beat-triggered camera cut: big kick after quiet = switch
+  const kickDelta = bands.sub - prevKick;
+  if (camModeTimer > CFG.camera.modeDuration && kickDelta > 0.04 && totalEnergy() > 0.3) {
+    camPrevMode = camMode;
+    camMode = (camMode + 1 + Math.floor(Math.random() * (CFG.camera.modes.length - 1))) % CFG.camera.modes.length;
+    camModeTimer = 0;
+    camTransition = 0;
+  }
+
+  // Camera mode targets
+  const camTargets = {
+    orbit:   { dist: 4.0, height: 1.5, orbitSpeed: 0.4, fovMul: 1.0 },
+    closeup: { dist: 2.2, height: 0.8, orbitSpeed: 0.6, fovMul: 1.4 },
+    wide:    { dist: 7.0, height: 2.5, orbitSpeed: 0.25, fovMul: 0.8 },
+    side:    { dist: 3.5, height: 0.2, orbitSpeed: 0.8, fovMul: 1.1 },
+    topdown: { dist: 3.0, height: 5.0, orbitSpeed: 0.3, fovMul: 0.9 },
+  };
+  const target = camTargets[CFG.camera.modes[camMode]];
+  const lerpRate = 2.5 * dt;
+  camSmooth.dist += (target.dist - camSmooth.dist) * lerpRate;
+  camSmooth.height += (target.height - camSmooth.height) * lerpRate;
+  camSmooth.orbitSpeed += (target.orbitSpeed - camSmooth.orbitSpeed) * lerpRate;
+  camSmooth.fovMul += (target.fovMul - camSmooth.fovMul) * lerpRate;
+
+  // Shape morphing cycle
+  shapeTimer += dt;
+  if (!isMorphing && shapeTimer > CFG.shapeDuration) {
+    isMorphing = true;
+    shapeTimer = 0;
+    nextShape = (currentShape + 1) % CFG.numShapes;
+  }
+  if (isMorphing) {
+    morphProgress = Math.min(1, shapeTimer / CFG.morphDuration);
+    // Smooth ease in-out
+    morphProgress = morphProgress * morphProgress * (3 - 2 * morphProgress);
+    if (shapeTimer > CFG.morphDuration) {
+      currentShape = nextShape;
+      nextShape = (currentShape + 1) % CFG.numShapes;
+      morphProgress = 0;
+      isMorphing = false;
+      shapeTimer = 0;
+    }
+  }
+
+  const energy = totalEnergy();
+  const bm = CFG.bandMultipliers;
+  const kick = Math.min(1, bands.sub * bm.kick);
+  const snare = Math.min(1, bands.low * bm.snare);
+  const hat = Math.min(1, bands.high * bm.hat);
+  const chaos = chaosMetric;
+  const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
+  const time = t - t0;
 
   // Pass 1: Scene (half res)
-  gl.bindFramebuffer(gl.FRAMEBUFFER,sceneFB.fb);gl.viewport(0,0,sceneW,sceneH);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFB.fb);
+  gl.viewport(0, 0, sceneW, sceneH);
   gl.useProgram(sceneProg);
-  gl.uniform1f(sceneU.uTime,time);gl.uniform1f(sceneU.uEnergy,energy);
-  gl.uniform1f(sceneU.uKick,kick);gl.uniform1f(sceneU.uSnare,snare);
-  gl.uniform1f(sceneU.uHat,hat);gl.uniform1f(sceneU.uChaos,chaos);
-  gl.uniform1f(sceneU.uHue,hue);gl.uniform2f(sceneU.uRes,sceneW,sceneH);
-  tri();
+  gl.uniform1f(sceneU.uTime, time);
+  gl.uniform1f(sceneU.uEnergy, energy);
+  gl.uniform1f(sceneU.uKick, kick);
+  gl.uniform1f(sceneU.uSnare, snare);
+  gl.uniform1f(sceneU.uHat, hat);
+  gl.uniform1f(sceneU.uChaos, chaos);
+  gl.uniform1f(sceneU.uHue, hue);
+  gl.uniform2f(sceneU.uMouse, smoothMouseX, smoothMouseY);
+  gl.uniform1f(sceneU.uCamDist, camSmooth.dist);
+  gl.uniform1f(sceneU.uCamHeight, camSmooth.height);
+  gl.uniform1f(sceneU.uCamOrbitSpd, camSmooth.orbitSpeed);
+  gl.uniform1f(sceneU.uCamFov, camSmooth.fovMul);
+  gl.uniform1f(sceneU.uMorph, morphProgress);
+  gl.uniform1i(sceneU.uShapeA, currentShape);
+  gl.uniform1i(sceneU.uShapeB, nextShape);
+  gl.uniform2f(sceneU.uRes, sceneW, sceneH);
+  drawFullscreenTriangle();
 
-  // Pass 2: Post (full res)
-  const src=ppFB[ppIdx],dst=ppFB[1-ppIdx];
-  gl.bindFramebuffer(gl.FRAMEBUFFER,dst.fb);gl.viewport(0,0,screenW,screenH);
+  // Pass 2: Post-processing (full res)
+  const src = ppFB[ppIdx], dst = ppFB[1 - ppIdx];
+  gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+  gl.viewport(0, 0, screenW, screenH);
   gl.useProgram(postProg);
-  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,sceneFB.tex);gl.uniform1i(postU.uScene,0);
-  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,src.tex);gl.uniform1i(postU.uPrev,1);
-  gl.uniform1f(postU.uTime,time);gl.uniform1f(postU.uEnergy,energy);
-  gl.uniform1f(postU.uKick,kick);gl.uniform1f(postU.uChaos,chaos);
-  gl.uniform2f(postU.uRes,screenW,screenH);tri();
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneFB.tex); gl.uniform1i(postU.uScene, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src.tex); gl.uniform1i(postU.uPrev, 1);
+  gl.uniform1f(postU.uTime, time);
+  gl.uniform1f(postU.uEnergy, energy);
+  gl.uniform1f(postU.uKick, kick);
+  gl.uniform1f(postU.uChaos, chaos);
+  gl.uniform1f(postU.uPhase, evolutionPhase + phaseTimer / CFG.phaseDuration);
+  gl.uniform2f(postU.uRes, screenW, screenH);
+  drawFullscreenTriangle();
 
   // Blit to screen
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,dst.fb);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
-  gl.viewport(0,0,screenW,screenH);
-  gl.blitFramebuffer(0,0,screenW,screenH,0,0,screenW,screenH,gl.COLOR_BUFFER_BIT,gl.NEAREST);
-  ppIdx=1-ppIdx;
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, dst.fb);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  gl.viewport(0, 0, screenW, screenH);
+  gl.blitFramebuffer(0, 0, screenW, screenH, 0, 0, screenW, screenH, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  ppIdx = 1 - ppIdx;
 
-  // Canvas overlay: bars, ring, waveform, particles
-  const W=window.innerWidth,H=window.innerHeight;
+  // Canvas 2D overlay
+  const W = window.innerWidth, H = window.innerHeight;
   const aliveP = drawOverlay(dt, W, H, energy, kick, hue);
 
   // HUD
-  hudTimer-=dt;if(hudTimer<=0)hud.classList.add('hidden');
-  if(!hud.classList.contains('hidden')){
-    document.getElementById('hud-fps').textContent=fpsDisplay;
-    document.getElementById('hud-frametime').textContent=(dt*1000).toFixed(1);
-    document.getElementById('hud-res').textContent=`GL:${screenW}x${screenH} Scene:${sceneW}x${sceneH}`;
-    document.getElementById('hud-energy').textContent='Energy: '+energy.toFixed(2);
-    document.getElementById('hud-chaos').textContent='Chaos: '+chaos.toFixed(2);
-    document.getElementById('hud-band').textContent=`K:${kick.toFixed(2)} S:${snare.toFixed(2)} H:${hat.toFixed(2)}`;
-    document.getElementById('hud-particles').textContent='P:'+aliveP+'/'+MAX_PARTICLES;
+  if (showDebug) {
+    document.getElementById('hud-fps').textContent = fpsDisplay;
+    document.getElementById('hud-frametime').textContent = (dt * 1000).toFixed(1);
+    document.getElementById('hud-res').textContent = `GL:${screenW}x${screenH} Scene:${sceneW}x${sceneH} DPR:${Math.min(window.devicePixelRatio, 2).toFixed(1)}`;
+    document.getElementById('hud-energy').textContent = 'Energy: ' + energy.toFixed(2);
+    document.getElementById('hud-chaos').textContent = 'Chaos: ' + chaos.toFixed(2);
+    document.getElementById('hud-band').textContent = `K:${kick.toFixed(2)} S:${snare.toFixed(2)} H:${hat.toFixed(2)}`;
+    const shapeNames = ['protein','crystal','jellyfish','blackhole'];
+    document.getElementById('hud-particles').textContent = `P:${aliveP}/${CFG.maxParticles} Cam:${CFG.camera.modes[camMode]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''}`;
+
   }
 }
+
 requestAnimationFrame(frame);
-console.log('Breakcore Visualizer v3 — WebGL2 + GLSL + Canvas overlay');
+console.log('Breakcore Visualizer v4 — WebGL2 + GLSL + Canvas 2D overlay');
 </script>
 </body>
 </html>
