@@ -164,7 +164,7 @@ void main() {
       vec3 gp = ro + rd * gridT;
       float g = 1.0 - gridLines(gp.xy, uTime);
       float fade = exp(-gridT * 0.03);
-      vec3 gridColor = hsl(uHue/360.0, 0.8, 0.3) * (0.15 + uEnergy * 0.4);
+      vec3 gridColor = hsl(uHue/360.0, 0.9, 0.4) * (0.25 + uEnergy * 0.5);
       bgCol += gridColor * g * fade;
     }
     // Second grid plane (floor)
@@ -172,8 +172,8 @@ void main() {
     if (floorT > 0.0 && floorT < 30.0) {
       vec3 fp = ro + rd * floorT;
       float g = 1.0 - gridLines(fp.xz, uTime * 0.5);
-      float fade = exp(-floorT * 0.06);
-      vec3 floorCol = hsl(310.0/360.0, 0.7, 0.25) * (0.1 + uKick * 0.3);
+      float fade = exp(-floorT * 0.05);
+      vec3 floorCol = hsl(310.0/360.0, 0.8, 0.35) * (0.15 + uKick * 0.4);
       bgCol += floorCol * g * fade;
     }
   }
@@ -213,18 +213,24 @@ void main() {
       surfCol = mix(surfCol, hatCol, uHat * 0.5);
     }
 
-    // Controlled lighting — never let it blow out
-    float glow = 1.5 / (1.0 + dist * dist * 0.15);
-    col += surfCol * glow * (0.6 + uKick * 0.4);
-    col += kickCol * uKick * 0.15;
-    col += hatCol * uHat * 0.1;
+    // Vivid lighting — preserve color at all energy levels
+    float glow = 2.2 / (1.0 + dist * dist * 0.12);
+    // Darken center at high energy to preserve structure
+    float structureBoost = mix(1.0, 0.7, uEnergy * uEnergy);
+    col += surfCol * glow * (0.8 + uKick * 0.4) * structureBoost;
+    // Add colored rim light instead of flat brightness
+    vec3 rimCol = mix(hatCol, kickCol, 0.5 + 0.5*sin(uTime));
+    float rim = smoothstep(0.01, 0.08, abs(torusSDF(p)));
+    col += rimCol * rim * 0.4 * (1.0 + uKick * 0.5);
+    col += kickCol * uKick * 0.2;
+    col += hatCol * uHat * 0.12;
   }
 
-  // Glow halo — subtle neon rim
-  float nearGlow = 0.04 / (0.01 + minDist * minDist);
-  nearGlow = min(nearGlow, 0.6);
+  // Glow halo — neon rim, visible but not blinding
+  float nearGlow = 0.05 / (0.01 + minDist * minDist);
+  nearGlow = min(nearGlow, 0.8);
   vec3 glowColor = mix(kickCol, hatCol, 0.5 + 0.5 * sin(uTime * 0.5));
-  col += glowColor * nearGlow * (0.15 + uEnergy * 0.25);
+  col += glowColor * nearGlow * (0.2 + uEnergy * 0.3);
 
   // Scanlines
   col *= 1.0 - 0.06 * step(0.5, fract(gl_FragCoord.y * 0.5)) * (1.0 + uChaos);
@@ -279,10 +285,9 @@ void main() {
   col += flashCol * smoothstep(0.8,1.0,uKick) * 0.12;
   // Stronger vignette to keep edges dark
   col *= 1.0 - length(vUV*2.0-1.0) * 0.45;
-  // Tone map — aggressive compression to prevent blow-out
-  col = col / (1.0 + col * 0.5);
-  // Clamp final output
-  col = min(col, vec3(0.95));
+  // Tone map — preserve color saturation, only compress extremes
+  col = col / (1.0 + col * 0.3);
+  col = min(col, vec3(0.92));
   fragColor = vec4(col, 1.0);
 }`;
 
@@ -403,56 +408,124 @@ let prevKick=0,prevSnare=0,prevHat=0;
 function updateSpawns(){
   if(!isPlaying)return;
   const kd=bands.sub-prevKick,sd=bands.low-prevSnare,hd=bands.high-prevHat,e=totalEnergy();
-  if(kd>0.015)spawnBurst('kick',30+Math.floor(Math.random()*20),310);
-  if(sd>0.012)spawnBurst('snare',20+Math.floor(Math.random()*15),0);
+  if(kd>0.015){spawnBurst('kick',30+Math.floor(Math.random()*20),310);spawnRing(310);if(Math.random()<0.4)spawnTear()}
+  if(sd>0.012){spawnBurst('snare',20+Math.floor(Math.random()*15),0);if(sd>0.03)spawnRing(0)}
   if(hd>0.008)spawnBurst('hat',25+Math.floor(Math.random()*15),(spectralCentroid-200)/3800*360+180);
-  if(e>0.6&&kd>0.03)spawnBurst('peak',40+Math.floor(Math.random()*30),Math.random()*360);
+  if(e>0.6&&kd>0.03){spawnBurst('peak',40+Math.floor(Math.random()*30),Math.random()*360);spawnRing(Math.random()*360);spawnTear();if(Math.random()<0.3)spawnTear()}
   prevKick=bands.sub;prevSnare=bands.low;prevHat=bands.high;
 }
 
-// ─── Canvas 2D: Frequency Bars + Spectrum Ring + Waveform + Particles ─
+// ─── Shock Rings (expand outward on kicks) ─────────────────────────
+const MAX_RINGS = 8;
+const shockRings = [];
+function spawnRing(hue) {
+  shockRings.push({ r: 0, maxR: Math.min(window.innerWidth, window.innerHeight) * 0.6, life: 1.0, hue, speed: 400 + Math.random() * 300 });
+  if (shockRings.length > MAX_RINGS) shockRings.shift();
+}
+
+// ─── Starfield ──────────────────────────────────────────────────────
+const NUM_STARS = 300;
+const stars = [];
+for (let i = 0; i < NUM_STARS; i++) {
+  stars.push({
+    angle: Math.random() * Math.PI * 2,
+    dist: 0.1 + Math.random() * 0.9,
+    speed: 0.02 + Math.random() * 0.1,
+    size: 1.0 + Math.random() * 2.5,
+    hue: Math.random() * 360
+  });
+}
+
+// ─── Reality Tears (glitch rips in the background) ──────────────────
+const MAX_TEARS = 12;
+const tears = [];
+function spawnTear() {
+  const side = Math.random() < 0.5 ? -1 : 1; // left or right
+  tears.push({
+    x: window.innerWidth * (0.5 + side * (0.25 + Math.random() * 0.25)),
+    y: window.innerHeight * (0.1 + Math.random() * 0.8),
+    w: 3 + Math.random() * 8,
+    h: 30 + Math.random() * 120,
+    life: 0.3 + Math.random() * 0.5,
+    maxLife: 0.3 + Math.random() * 0.5,
+    hue: Math.random() * 360,
+    drift: (Math.random() - 0.5) * 60,
+    jagged: Math.random() < 0.5, // jagged vs smooth tear
+  });
+  if (tears.length > MAX_TEARS) tears.shift();
+}
+
+// ─── Visual Evolution State ─────────────────────────────────────────
+let evolutionPhase = 0; // rotates through visual modes over time
+let phaseTimer = 0;
+const PHASE_DURATION = 20; // seconds per phase
+
+// ─── Spinning Wireframe Shapes ──────────────────────────────────────
+function drawPolygon(cx, cy, r, sides, rotation, color, alpha, lineW) {
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineW;
+  ctx.beginPath();
+  for (let i = 0; i <= sides; i++) {
+    const a = rotation + (i / sides) * Math.PI * 2;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+// ─── Canvas 2D Overlay ──────────────────────────────────────────────
+let overlayTime = 0;
 function drawOverlay(dt, W, H, energy, kick, hue) {
   ctx.clearRect(0, 0, W, H);
+  overlayTime += dt;
+  const cx = W / 2, cy = H / 2;
+
+  // ── Starfield (always visible, pulses with energy) ──
+  const starBaseSpeed = 0.3 + energy * 2.0;
+  for (const s of stars) {
+    s.dist += s.speed * starBaseSpeed * dt;
+    if (s.dist > 1.2) { s.dist = 0.05; s.angle = Math.random() * Math.PI * 2; s.hue = hue + Math.random() * 60; }
+    const x = cx + Math.cos(s.angle) * s.dist * W * 0.55;
+    const y = cy + Math.sin(s.angle) * s.dist * H * 0.55;
+    const alpha = Math.min(1, s.dist * 2) * (0.4 + energy * 0.6);
+    const sz = s.size * (0.6 + s.dist * 2.0);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = `hsl(${s.hue},80%,70%)`;
+    ctx.fillRect(x - sz * 0.5, y - sz * 0.5, sz, sz);
+  }
+  ctx.globalAlpha = 1;
 
   if (isPlaying && freqData) {
     // ── Side Frequency Bars (left + right, mirrored) ──
     const barH = H * 0.6;
-    const barW = 4;
     const gap = 2;
     const startY = H * 0.2;
 
     for (let i = 0; i < NUM_BARS; i++) {
       const v = smoothBars[i];
-      const bh = v * barH;
-      const y = startY + (barH - bh) / 2 + (NUM_BARS - i) * (barH / NUM_BARS) - barH / 2;
       const yPos = startY + i * (barH / NUM_BARS);
       const barLen = v * W * 0.12;
-
-      // Color: low=magenta, mid=cyan, high=white
       const barHue = 310 - i * (310 / NUM_BARS) + (hue * 0.3);
       const sat = i > NUM_BARS * 0.8 ? 60 : 100;
       const lit = 40 + v * 30;
-
       ctx.fillStyle = `hsla(${barHue},${sat}%,${lit}%,${0.5 + v * 0.5})`;
-      // Left side
       ctx.fillRect(0, yPos, barLen, Math.max(1, barH / NUM_BARS - gap));
-      // Right side (mirrored)
       ctx.fillRect(W - barLen, yPos, barLen, Math.max(1, barH / NUM_BARS - gap));
     }
 
     // ── Circular Spectrum Ring ──
-    const cx = W / 2, cy = H / 2;
     const ringR = Math.min(W, H) * 0.28;
     const ringBars = 128;
-
     ctx.lineWidth = 2;
     for (let i = 0; i < ringBars; i++) {
-      const idx = Math.floor(Math.pow(i / ringBars, 1.5) * (freqData ? freqData.length : 1));
-      const v = freqData ? freqData[Math.min(idx, freqData.length - 1)] / 255 : 0;
+      const idx = Math.floor(Math.pow(i / ringBars, 1.5) * freqData.length);
+      const v = freqData[Math.min(idx, freqData.length - 1)] / 255;
       const angle = (i / ringBars) * Math.PI * 2 - Math.PI / 2;
       const inner = ringR - 5;
       const outer = ringR + v * ringR * 0.5;
-
       const rHue = (hue + i * (360 / ringBars)) % 360;
       ctx.strokeStyle = `hsla(${rHue},100%,${50 + v * 30}%,${0.3 + v * 0.6})`;
       ctx.beginPath();
@@ -461,23 +534,156 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       ctx.stroke();
     }
 
-    // ── Waveform (oscilloscope across the middle) ──
-    if (timeData) {
-      ctx.strokeStyle = `hsla(${hue + 180},100%,70%,0.4)`;
-      ctx.lineWidth = 1.5;
+    // ── Spinning Wireframe Shapes (corners + mid-sides, reactive) ──
+    const shapes = [
+      { x: W * 0.13, y: H * 0.18, sides: 5, rMul: 1.2, speed: 0.7, band: bands.sub },
+      { x: W * 0.87, y: H * 0.18, sides: 3, rMul: 1.0, speed: -1.1, band: bands.low },
+      { x: W * 0.13, y: H * 0.82, sides: 6, rMul: 1.1, speed: 0.9, band: bands.mid },
+      { x: W * 0.87, y: H * 0.82, sides: 4, rMul: 0.9, speed: -0.8, band: bands.high },
+      // Extra mid-edge shapes
+      { x: W * 0.06, y: H * 0.5, sides: 7, rMul: 0.8, speed: 0.5, band: (bands.sub + bands.low) / 2 },
+      { x: W * 0.94, y: H * 0.5, sides: 8, rMul: 0.7, speed: -0.6, band: (bands.mid + bands.high) / 2 },
+    ];
+    for (const sh of shapes) {
+      const r = (40 + sh.band * 80) * sh.rMul;
+      const rot = overlayTime * sh.speed;
+      const shHue = (hue + sh.sides * 50) % 360;
+      // 3 nested wireframes for depth
+      drawPolygon(sh.x, sh.y, r, sh.sides, rot, `hsl(${shHue},100%,60%)`, 0.3 + sh.band * 0.5, 2);
+      drawPolygon(sh.x, sh.y, r * 0.65, sh.sides, -rot * 1.3, `hsl(${(shHue+40)%360},80%,50%)`, 0.2 + sh.band * 0.4, 1.5);
+      drawPolygon(sh.x, sh.y, r * 0.35, sh.sides, rot * 2, `hsl(${(shHue+80)%360},90%,55%)`, 0.15 + sh.band * 0.3, 1);
+    }
+
+    // ── Bass Pulse Arcs (bottom half, kick-reactive) ──
+    const bassR = Math.min(W, H) * 0.45;
+    const bassKick = bands.sub;
+    for (let i = 0; i < 3; i++) {
+      const arcR = bassR * (0.6 + i * 0.2) + bassKick * 40;
+      const arcStart = Math.PI * 0.55 + i * 0.08;
+      const arcEnd = Math.PI * 0.95 - i * 0.08;
+      const arcHue = (hue + 310 + i * 30) % 360;
+      ctx.globalAlpha = 0.15 + bassKick * 0.5;
+      ctx.strokeStyle = `hsl(${arcHue},100%,55%)`;
+      ctx.lineWidth = 2 + bassKick * 4;
       ctx.beginPath();
-      const waveW = W * 0.6;
-      const waveX = W * 0.2;
-      const step = Math.floor(timeData.length / waveW) || 1;
-      for (let i = 0; i < waveW; i++) {
-        const idx = Math.min(i * step, timeData.length - 1);
-        const v = (timeData[idx] / 128.0 - 1.0);
-        const x = waveX + i;
-        const y = cy + v * H * 0.15 * (1 + energy);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
+      ctx.arc(cx, cy + H * 0.1, arcR, arcStart, arcEnd);
+      ctx.stroke();
+      // Mirror to left
+      ctx.beginPath();
+      ctx.arc(cx, cy + H * 0.1, arcR, Math.PI + (Math.PI - arcEnd), Math.PI + (Math.PI - arcStart));
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
+
+    // ── Energy Tendrils (radiating lines, mid-reactive) ──
+    const numTendrils = 16;
+    const midBand = bands.mid;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < numTendrils; i++) {
+      const a = (i / numTendrils) * Math.PI * 2 + overlayTime * 0.3;
+      const len = 80 + midBand * 200 + Math.sin(overlayTime * 3 + i) * 30;
+      const startR = Math.min(W, H) * 0.25;
+      ctx.globalAlpha = 0.1 + midBand * 0.3;
+      ctx.strokeStyle = `hsl(${(hue + i * 22) % 360},70%,50%)`;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * startR, cy + Math.sin(a) * startR);
+      ctx.lineTo(cx + Math.cos(a) * (startR + len), cy + Math.sin(a) * (startR + len));
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── Shock Rings (expanding on kicks) — thicker, longer-lasting ──
+    for (let i = shockRings.length - 1; i >= 0; i--) {
+      const ring = shockRings[i];
+      ring.r += ring.speed * dt;
+      ring.life -= dt * 1.0; // slower decay
+      if (ring.life <= 0) { shockRings.splice(i, 1); continue; }
+      ctx.globalAlpha = ring.life * 0.7;
+      ctx.strokeStyle = `hsl(${ring.hue},100%,65%)`;
+      ctx.lineWidth = 3 + ring.life * 5; // thicker
+      ctx.beginPath();
+      ctx.arc(cx, cy, ring.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ── Reality Tears (glitch rips) ──
+  for (let i = tears.length - 1; i >= 0; i--) {
+    const t = tears[i];
+    t.life -= dt;
+    t.y += t.drift * dt;
+    if (t.life <= 0) { tears.splice(i, 1); continue; }
+    const alpha = (t.life / t.maxLife);
+    const flicker = Math.random() > 0.3 ? 1 : 0; // glitchy flicker
+
+    if (flicker) {
+      ctx.globalAlpha = alpha * 0.8;
+      // Main tear — bright colored slit
+      ctx.fillStyle = `hsl(${t.hue},100%,70%)`;
+      if (t.jagged) {
+        // Jagged tear: multiple offset segments
+        for (let s = 0; s < 5; s++) {
+          const segY = t.y - t.h/2 + s * (t.h/5);
+          const offX = (Math.random() - 0.5) * 15;
+          ctx.fillRect(t.x + offX, segY, t.w * (0.5 + Math.random()), t.h/5 - 1);
+        }
+      } else {
+        ctx.fillRect(t.x, t.y - t.h/2, t.w, t.h);
+      }
+      // White-hot core
+      ctx.globalAlpha = alpha * 0.5;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(t.x + t.w * 0.3, t.y - t.h * 0.4, t.w * 0.4, t.h * 0.8);
+      // Chromatic bleed on sides
+      ctx.globalAlpha = alpha * 0.3;
+      ctx.fillStyle = `hsl(${(t.hue + 120) % 360},100%,60%)`;
+      ctx.fillRect(t.x - 4, t.y - t.h * 0.3, 3, t.h * 0.6);
+      ctx.fillStyle = `hsl(${(t.hue + 240) % 360},100%,60%)`;
+      ctx.fillRect(t.x + t.w + 1, t.y - t.h * 0.3, 3, t.h * 0.6);
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // ── Visual Evolution (phase shifts over time) ──
+  if (isPlaying) {
+    phaseTimer += dt;
+    if (phaseTimer > PHASE_DURATION) { phaseTimer = 0; evolutionPhase = (evolutionPhase + 1) % 4; }
+    const phaseProg = phaseTimer / PHASE_DURATION;
+
+    // Phase-specific overlays
+    if (evolutionPhase === 1 || evolutionPhase === 3) {
+      // Scanning horizontal lines
+      const numLines = 5 + Math.floor(energy * 10);
+      ctx.lineWidth = 1;
+      for (let i = 0; i < numLines; i++) {
+        const ly = (overlayTime * 40 + i * (H / numLines)) % H;
+        ctx.globalAlpha = 0.06 + energy * 0.08;
+        ctx.strokeStyle = `hsl(${(hue + i * 20) % 360},60%,50%)`;
+        ctx.beginPath();
+        ctx.moveTo(0, ly);
+        ctx.lineTo(W, ly);
+        ctx.stroke();
+      }
+    }
+    if (evolutionPhase === 2 || evolutionPhase === 3) {
+      // Diagonal cross-hatch pattern
+      ctx.lineWidth = 0.5;
+      ctx.globalAlpha = 0.04 + energy * 0.06;
+      ctx.strokeStyle = `hsl(${hue},40%,40%)`;
+      const spacing = 40 - energy * 15;
+      for (let i = -W; i < W + H; i += spacing) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i + H, H);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(i + H, 0);
+        ctx.lineTo(i, H);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 
   // ── Particles ──
