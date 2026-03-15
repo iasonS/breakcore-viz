@@ -88,8 +88,6 @@ const CFG = {
   numStars: 400,
   maxRings: 12,
   maxTears: 30,
-  numTendrils: 16,
-
   // Visual evolution
   phaseDuration: 6,    // seconds per evolution phase — breakcore doesn't linger
   shapeDuration: 8,    // seconds per shape before morphing
@@ -642,16 +640,9 @@ void main() {
   float nearGlow = min(0.05/(0.01+minDist*minDist), 0.8);
   col += glowCol * nearGlow * (0.05 + uKick * 0.3);
 
-  // Kick flash — whole scene brightens on beat
-  col += kickCol * uKick * 0.08;
-
   // Distance fog
   float fogFactor = 1.0 - exp(-dist * uFogDensity);
   col = mix(col, fogCol, fogFactor);
-
-  // Scanlines + vignette
-  col *= 1.0 - 0.06*step(0.5, fract(gl_FragCoord.y*0.5))*(1.0+uChaos);
-  col *= 1.0 - dot(vUV*2.0-1.0, vUV*2.0-1.0)*0.25;
 
   fragColor = vec4(col, 1.0);
 }`;
@@ -1865,30 +1856,6 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
   }
   ctx.globalAlpha = 1;
 
-  // Hyperspace tunnel lines — subtle, kick-triggered
-  if (kick > 0.3) {
-    const tunnelIntensity = Math.min(1.0, (kick - 0.3) / 0.5);
-    const numLines = 12;
-    ctx.lineWidth = 0.8;
-    for (let i = 0; i < numLines; i++) {
-      const a = (i / numLines) * Math.PI * 2 + overlayTime * 0.1;
-      const innerR = 0.08;
-      const outerR = 0.25 + tunnelIntensity * 0.3;
-      const x1 = vpX + Math.cos(a) * innerR * W;
-      const y1 = vpY + Math.sin(a) * innerR * H;
-      const x2 = vpX + Math.cos(a) * outerR * W;
-      const y2 = vpY + Math.sin(a) * outerR * H;
-      const lineHue = (hue + i * (360 / numLines)) % 360;
-      ctx.globalAlpha = tunnelIntensity * 0.06;
-      ctx.strokeStyle = `hsl(${lineHue},50%,45%)`;
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-  }
-
   if (isPlaying && freqData) {
     // Side Frequency Bars — subtle peripheral accent
     const barH = H * 0.5;
@@ -1928,48 +1895,6 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       ctx.stroke();
     }
 
-    // ── Center Waveform — time-domain oscilloscope through the middle ──
-    if (timeData) {
-      const waveW = ringR * 1.4;
-      const waveH = ringR * 0.5;
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.35 + kick * 0.4 + energy * 0.15;
-      ctx.strokeStyle = `hsl(${(hue + 180) % 360},80%,60%)`;
-      ctx.beginPath();
-      const step = Math.max(1, Math.floor(timeData.length / 200));
-      for (let i = 0; i < 200; i++) {
-        const ti = Math.min(i * step, timeData.length - 1);
-        const v = (timeData[ti] / 128.0 - 1.0);
-        const wx = ringCX - waveW / 2 + (i / 200) * waveW;
-        const wy = ringCY + v * waveH * (0.5 + kick * 0.5);
-        if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
-      }
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-
-    // ── Radial Frequency Landscape — single subtle inner ring ──
-    const landR = ringR * 0.45;
-    ctx.lineWidth = 1;
-    {
-      const rr = landR * 0.6;
-      const numPts = 64;
-      ctx.globalAlpha = 0.2 + kick * 0.2;
-      ctx.strokeStyle = `hsl(${(hue + 40) % 360},70%,50%)`;
-      ctx.beginPath();
-      for (let i = 0; i <= numPts; i++) {
-        const angle = (i / numPts) * Math.PI * 2;
-        const fi = Math.floor(Math.pow(i / numPts, 1.8) * freqData.length * 0.5);
-        const v = freqData[Math.min(fi, freqData.length - 1)] / 255;
-        const r = rr + v * landR * 0.3;
-        const px = ringCX + Math.cos(angle) * r;
-        const py = ringCY + Math.sin(angle) * r;
-        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-
     // Spinning Wireframe Shapes with parallax
     const shapes = [
       { x: W*0.13, y: H*0.18, sides: 5, rMul: 1.2, speed: 0.7,  band: bands.sub, depth: 0.8 },
@@ -2006,22 +1931,6 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       ctx.lineWidth = 1.5 + bassKick * 2.5;
       ctx.beginPath(); ctx.arc(cx, cy + H * 0.1, arcR, arcStart, arcEnd); ctx.stroke();
       ctx.beginPath(); ctx.arc(cx, cy + H * 0.1, arcR, Math.PI + (Math.PI - arcEnd), Math.PI + (Math.PI - arcStart)); ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-
-    // Energy Tendrils — subtle
-    const midBand = bands.mid;
-    ctx.lineWidth = 0.8;
-    for (let i = 0; i < CFG.numTendrils; i++) {
-      const a = (i / CFG.numTendrils) * Math.PI * 2 + overlayTime * 0.3;
-      const len = 60 + midBand * 120 + Math.sin(overlayTime * 3 + i) * 20;
-      const startR = Math.min(W, H) * 0.25;
-      ctx.globalAlpha = 0.12 + midBand * 0.2;
-      ctx.strokeStyle = `hsl(${(hue + i * 22) % 360},50%,40%)`;
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(a) * startR, cy + Math.sin(a) * startR);
-      ctx.lineTo(cx + Math.cos(a) * (startR + len), cy + Math.sin(a) * (startR + len));
-      ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
@@ -2092,34 +2001,6 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     ctx.fillRect(t.x + t.w + 1, t.y - t.h*0.3, 3, t.h*0.6);
   }
   ctx.globalAlpha = 1;
-
-  // Evolution phase visual overlays
-  if (isPlaying) {
-    const e = totalEnergy();
-    const phaseVisual = evoPhaseIdx % 4;
-
-    if (phaseVisual === 1 || phaseVisual === 3) {
-      const numLines = 5 + Math.floor(e * 10);
-      ctx.lineWidth = 1;
-      for (let i = 0; i < numLines; i++) {
-        const ly = (overlayTime * 40 + i * (H / numLines)) % H;
-        ctx.globalAlpha = 0.06 + e * 0.08;
-        ctx.strokeStyle = `hsl(${(hue + i * 20) % 360},60%,50%)`;
-        ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W, ly); ctx.stroke();
-      }
-    }
-    if (phaseVisual === 2 || phaseVisual === 3) {
-      ctx.lineWidth = 0.5;
-      ctx.globalAlpha = 0.04 + e * 0.06;
-      ctx.strokeStyle = `hsl(${hue},40%,40%)`;
-      const spacing = 40 - e * 15;
-      for (let i = -W; i < W + H; i += spacing) {
-        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + H, H); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(i + H, 0); ctx.lineTo(i, H); ctx.stroke();
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
 
   // Particles
   let aliveCount = 0;
