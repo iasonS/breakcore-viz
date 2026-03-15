@@ -906,6 +906,7 @@ let spectralFlux = 0, spectralFlatness = 0, transientScore = 0;
 let prevSpectrumRT = null; // lazy init to match analyser bin count
 const transientBuf = new Float32Array(10); // rolling energy buffer for attack detection
 let transientBufIdx = 0;
+let percGateState = 0.5; // persistent percussion gate — onset-triggered, slow decay
 
 function initAudio() {
   if (audioCtx) return;
@@ -1009,16 +1010,19 @@ function processAudio() {
   // Normalize and smooth — sharp spikes = percussive onset
   spectralFlux += (flux / freqData.length * 10 - spectralFlux) * 0.4;
 
-  // 3B: Spectral flatness — geometric mean / arithmetic mean
-  // 0 = tonal (pitched/melodic), 1 = noise-like (drum/percussion)
-  let logSum = 0, arithSum = 0;
+  // 3B: Sub-band spectral flatness over kick range (20-500Hz)
+  // Full-spectrum flatness is always ~0 (most bins empty). Sub-band gives meaningful
+  // drum vs melodic distinction: kick spreads energy across sub bins, bass synth peaks narrowly.
   const eps = 1e-10;
-  for (let i = 1; i < freqData.length; i++) {
+  const flatLo = Math.max(1, Math.round(20 / (audioCtx.sampleRate / CFG.fftSize)));
+  const flatHi = Math.min(freqData.length - 1, Math.round(500 / (audioCtx.sampleRate / CFG.fftSize)));
+  let logSum = 0, arithSum = 0;
+  for (let i = flatLo; i <= flatHi; i++) {
     const val = Math.max(freqData[i] / 255, eps);
     logSum += Math.log(val);
     arithSum += val;
   }
-  const nBins = freqData.length - 1;
+  const nBins = flatHi - flatLo + 1;
   const geoMean = Math.exp(logSum / nBins);
   const arithMean = arithSum / nBins;
   const rawFlatness = arithMean > eps ? geoMean / arithMean : 0;
@@ -1339,15 +1343,17 @@ async function analyzeAudioOffline(file) {
       }
       tl.flux[f] = fluxSum / halfFFT * 10; // normalized, scaled
 
-      // 3B: Spectral flatness — geometric mean / arithmetic mean
+      // 3B: Sub-band spectral flatness over kick range (20-500Hz)
+      const flatLoB = Math.max(1, Math.round(20 / (sampleRate / fftSize)));
+      const flatHiB = Math.min(halfFFT - 1, Math.round(500 / (sampleRate / fftSize)));
       let lSum = 0, aSum = 0;
       const epsOff = 1e-10;
-      for (let k = 1; k < halfFFT; k++) {
+      for (let k = flatLoB; k <= flatHiB; k++) {
         const v = Math.max(mag[k], epsOff);
         lSum += Math.log(v);
         aSum += v;
       }
-      const nB = halfFFT - 1;
+      const nB = flatHiB - flatLoB + 1;
       const gm = Math.exp(lSum / nB);
       const am = aSum / nB;
       tl.flatness[f] = am > epsOff ? gm / am : 0;
@@ -1638,12 +1644,10 @@ function updateSpawns() {
   const th = CFG.onsetThresholds;
   const hueVal = (spectralCentroid - 200) / 3800 * 360 + 180;
 
-  // 3A/3B/3C: Gate spawn thresholds by percussion confidence
-  // High flatness + transient = definitely a drum hit → spawn freely
-  // Low flatness = melodic bass → suppress kick/snare spawns
-  const pg = Math.min(1, spectralFlatness * 3.0) * (0.3 + transientScore * 0.7);
-  const kickGated = kd * (0.15 + pg * 0.85);
-  const snareGated = sd * (0.2 + pg * 0.8);
+  // 3A/3B/3C: Gate spawn thresholds by persistent percussion confidence
+  const pg = percGateState;
+  const kickGated = kd * (0.3 + pg * 0.7);
+  const snareGated = sd * (0.35 + pg * 0.65);
 
   if (kickGated > th.kick) {
     spawnBurst('kick', 310);
@@ -2348,18 +2352,27 @@ function frame(nowMs) {
       smoothBars[i] = Math.max(0, (1.0 - f) * (0.4 + 0.4 * Math.sin(tt * 3.0 + i * 0.3)));
     }
     // Synthetic spectral analysis — demo mode simulates drums
-    spectralFlatness = 0.4 + 0.3 * Math.sin(tt * 5.3);
+    spectralFlatness = 0.5 + 0.3 * Math.sin(tt * 5.3);
     spectralFlux = 0.3 + 0.3 * Math.abs(Math.sin(tt * 5.3));
     transientScore = 0.5 + 0.4 * Math.max(0, Math.sin(tt * 5.3));
+    percGateState = 0.6 + 0.3 * Math.max(0, Math.sin(tt * 5.3));
   }
 
   const energy = totalEnergy();
   const bm = CFG.bandMultipliers;
-  // 3A/3B/3C: Percussion gate — high flatness (noise-like) + transient (fast attack) = drum
-  // Low flatness = tonal/melodic content → suppress kick/snare response
-  const percGate = Math.min(1, spectralFlatness * 3.0) * (0.3 + transientScore * 0.7);
-  const kick = Math.min(1, bands.sub * bm.kick * (0.15 + percGate * 0.85));
-  const snare = Math.min(1, bands.low * bm.snare * (0.2 + percGate * 0.8));
+  // 3A/3B/3C: Onset-triggered percussion gate
+  // Only reclassify at onsets (high flux). Between onsets, decay slowly.
+  // Sub-band flatness: high = noise-like (drum), low = tonal (bass synth)
+  if (spectralFlux > 0.08) {
+    // Onset detected — classify: drum or melodic?
+    const drumScore = Math.min(1, spectralFlatness * 2.5) * (0.4 + transientScore * 0.6);
+    percGateState = Math.max(percGateState, drumScore);
+  }
+  percGateState *= 0.95; // slow decay — let drum visuals ring
+  const percGate = percGateState;
+  // Floor of 0.3: even uncertain content gets 30% response. Drums push to 100%.
+  const kick = Math.min(1, bands.sub * bm.kick * (0.3 + percGate * 0.7));
+  const snare = Math.min(1, bands.low * bm.snare * (0.35 + percGate * 0.65));
   const hat = Math.min(1, bands.high * bm.hat); // hats are inherently noise-like, minimal gating
   const chaos = chaosMetric;
   const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
