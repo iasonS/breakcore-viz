@@ -2211,11 +2211,13 @@ function showModeChoice(file) {
     `<button id="btn-realtime" class="mode-btn"><span class="label">&#9654; Real-time</span><span class="desc">Instant playback, reactive only</span></button>` +
     `<button id="btn-analyzed" class="mode-btn recommended"><span class="label">&#9889; Analyzed</span><span class="desc">Pre-scans track &middot; anticipation &middot; look-ahead</span></button>` +
     `<small style="display:block;margin-top:16px;font-size:11px;color:rgba(0,255,0,.35)">Analyzed mode knows what's coming — camera, fog, and ring react before drops hit</small>`;
-  document.getElementById('btn-realtime').onclick = () => {
+  document.getElementById('btn-realtime').onclick = (e) => {
+    e.stopPropagation(); // prevent bubbling to dropZone click handler
     restoreDropZone();
     loadAudioRealtime(pendingFile);
   };
-  document.getElementById('btn-analyzed').onclick = () => {
+  document.getElementById('btn-analyzed').onclick = (e) => {
+    e.stopPropagation(); // prevent bubbling to dropZone click handler
     restoreDropZone();
     loadAudioAnalyzed(pendingFile);
   };
