@@ -925,6 +925,72 @@ function processAudio() {
   }
 }
 
+// ─── Song Section Detection ─────────────────────────────────────────
+const energyHistory = {
+  buffer: new Float32Array(300), // ~5 seconds at 60fps
+  idx: 0,
+  filled: 0,
+  avg: 0,
+  trend: 0, // positive = rising, negative = falling
+  trendDuration: 0, // seconds the trend has been sustained
+  ratio: 1.0, // current / avg
+  section: 'sustain', // 'breakdown', 'buildup', 'drop', 'sustain'
+  dropCooldown: 0, // prevent rapid re-triggering
+  prevSection: 'sustain',
+};
+
+function updateSongSection(dt) {
+  const e = totalEnergy();
+  const buf = energyHistory.buffer;
+  buf[energyHistory.idx] = e;
+  energyHistory.idx = (energyHistory.idx + 1) % buf.length;
+  if (energyHistory.filled < buf.length) energyHistory.filled++;
+
+  // Rolling average
+  let sum = 0;
+  for (let i = 0; i < energyHistory.filled; i++) sum += buf[i];
+  energyHistory.avg = energyHistory.filled > 0 ? sum / energyHistory.filled : e;
+
+  // Ratio: current vs recent average
+  energyHistory.ratio = energyHistory.avg > 0.01 ? e / energyHistory.avg : 1.0;
+
+  // Trend: compare recent 30 frames to older 30 frames
+  const recent = 30, older = 30;
+  if (energyHistory.filled > recent + older) {
+    let recentSum = 0, olderSum = 0;
+    for (let i = 0; i < recent; i++) {
+      const ri = (energyHistory.idx - 1 - i + buf.length) % buf.length;
+      recentSum += buf[ri];
+    }
+    for (let i = recent; i < recent + older; i++) {
+      const ri = (energyHistory.idx - 1 - i + buf.length) % buf.length;
+      olderSum += buf[ri];
+    }
+    const newTrend = (recentSum / recent) - (olderSum / older);
+    if (Math.sign(newTrend) === Math.sign(energyHistory.trend)) {
+      energyHistory.trendDuration += dt;
+    } else {
+      energyHistory.trendDuration = 0;
+    }
+    energyHistory.trend = newTrend;
+  }
+
+  energyHistory.dropCooldown = Math.max(0, energyHistory.dropCooldown - dt);
+
+  // Section classification
+  energyHistory.prevSection = energyHistory.section;
+  if (energyHistory.ratio > 1.6 && energyHistory.dropCooldown <= 0 && energyHistory.trend > 0.02) {
+    energyHistory.section = 'drop';
+    energyHistory.dropCooldown = 3.0; // don't re-trigger for 3 seconds
+  } else if (energyHistory.ratio < 0.45 && e < 0.25) {
+    energyHistory.section = 'breakdown';
+  } else if (energyHistory.trend > 0.01 && energyHistory.trendDuration > 1.5) {
+    energyHistory.section = 'buildup';
+  } else {
+    energyHistory.section = 'sustain';
+  }
+}
+
 // ─── Particle Pool ──────────────────────────────────────────────────
 const pool = new Array(CFG.maxParticles);
 for (let i = 0; i < CFG.maxParticles; i++) {
@@ -1469,6 +1535,7 @@ function frame(nowMs) {
   }
 
   processAudio();
+  updateSongSection(dt);
   updateSpawns();
 
   // Smooth mouse tracking
@@ -1510,13 +1577,27 @@ function frame(nowMs) {
   const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
   const time = t - t0;
 
-  // ── Evolution phase system ──
+  // ── Evolution phase system — song-section aware ──
   evoPhaseTimer += dt;
   const kickDelta = bands.sub - prevKick;
-  // Beat-triggered or timed phase advance
-  if (evoPhaseTimer > CFG.phaseDuration && (kickDelta > 0.01 || evoPhaseTimer > CFG.phaseDuration * 1.5)) {
-    evoPhaseTimer = 0;
+  const section = energyHistory.section;
+
+  // Song section overrides: drops force phase change, breakdowns hold
+  if (section === 'drop' && energyHistory.prevSection !== 'drop') {
+    // DROP: force a phase change immediately
     evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
+    evoPhaseTimer = 0;
+  } else if (section === 'breakdown') {
+    // Hold current phase during breakdowns — no timer advance
+  } else if (section === 'buildup') {
+    // Slow phase timer during buildups — build tension
+    evoPhaseTimer += dt * 0.3;
+  } else {
+    // Normal: timer + beat triggered
+    if (evoPhaseTimer > CFG.phaseDuration && (kickDelta > 0.01 || evoPhaseTimer > CFG.phaseDuration * 1.5)) {
+      evoPhaseTimer = 0;
+      evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
+    }
   }
 
   // Smooth lerp toward current phase targets
@@ -1529,11 +1610,25 @@ function frame(nowMs) {
   evoSmooth.objScale += (target.objScale - evoSmooth.objScale) * evoLerp;
   evoSmooth.colorGrade += (target.colorGrade - evoSmooth.colorGrade) * evoLerp;
 
+  // Song section visual modulation
+  let sectionSpeedMul = 1.0;
+  let sectionFogMul = 1.0;
+  if (section === 'breakdown') {
+    sectionSpeedMul = 0.3; // crawl speed
+    sectionFogMul = 0.5;   // clear fog — see deep into space
+  } else if (section === 'buildup') {
+    sectionSpeedMul = 0.6 + energyHistory.trendDuration * 0.15; // gradually accelerate
+    sectionFogMul = 1.0 + energyHistory.trendDuration * 0.1;    // fog slowly closes in
+  } else if (section === 'drop') {
+    sectionSpeedMul = 2.5; // blast forward
+    sectionFogMul = 0.7;   // clear for impact
+  }
+
   // ── Forward camera ──
-  const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed) * evoSmooth.speedMul;
+  const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed) * evoSmooth.speedMul * sectionSpeedMul;
   cameraZ += forwardSpeed * dt;
   if (kickDelta > 0.015) {
-    cameraZ += CFG.camKickImpulse;
+    cameraZ += CFG.camKickImpulse * (section === 'drop' ? 3.0 : 1.0);
   }
   cameraSpeed = forwardSpeed;
   // Camera XY drift (must match shader formula)
@@ -1590,7 +1685,7 @@ function frame(nowMs) {
   gl.uniform2f(sceneU.uMouse, smoothMouseX, smoothMouseY);
   gl.uniform1f(sceneU.uCamZ, cameraZ);
   gl.uniform1f(sceneU.uTunnelBlend, evoSmooth.tunnelBlend);
-  gl.uniform1f(sceneU.uFogDensity, evoSmooth.fogDensity);
+  gl.uniform1f(sceneU.uFogDensity, evoSmooth.fogDensity * sectionFogMul);
   gl.uniform1f(sceneU.uRepPeriod, evoSmooth.repPeriod);
   gl.uniform1f(sceneU.uObjScale, evoSmooth.objScale);
   gl.uniform2f(sceneU.uCamXY, camDriftX, camDriftY);
@@ -1641,7 +1736,7 @@ function frame(nowMs) {
     const shapeNames = ['protein','crystal','jellyfish','blackhole'];
     const phaseNames = CFG.evoPhases.map((_,i) => `P${i}`);
     document.getElementById('hud-extra').textContent =
-      `P:${aliveP}/${CFG.maxParticles} Z:${cameraZ.toFixed(0)} Spd:${cameraSpeed.toFixed(1)} Phase:${phaseNames[evoPhaseIdx]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''}`;
+      `P:${aliveP}/${CFG.maxParticles} Z:${cameraZ.toFixed(0)} Spd:${cameraSpeed.toFixed(1)} Phase:${phaseNames[evoPhaseIdx]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''} [${section.toUpperCase()}]`;
   }
 }
 
