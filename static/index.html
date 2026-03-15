@@ -1262,29 +1262,80 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       ctx.fillRect(W - barLen, yPos, barLen, Math.max(1, barH / CFG.numBars - 2));
     }
 
-    // Tunnel of Spectrum Rings — THE MAIN EVENT, fills the center
-    for (let depth = 0; depth < 4; depth++) {
-      const depthScale = 1.0 - depth * 0.18;
-      const depthAlpha = 1.0 - depth * 0.2;
-      const ringR = Math.min(W, H) * 0.42 * depthScale;
-      const ringCX = cx + (vpX - cx) * depth * 0.12;
-      const ringCY = cy + (vpY - cy) * depth * 0.12;
+    // ── Outer Spectrum Ring — breathes with energy, spikes inward + outward ──
+    const sectionBreath = section === 'drop' ? 1.3 : section === 'breakdown' ? 0.7 : 1.0;
+    const ringR = Math.min(W, H) * (0.35 + energy * 0.1) * sectionBreath;
+    const ringCX = cx + (vpX - cx) * 0.05;
+    const ringCY = cy + (vpY - cy) * 0.05;
 
-      ctx.lineWidth = Math.max(2, 4 - depth);
-      for (let i = 0; i < 128; i++) {
-        const idx = Math.floor(Math.pow(i / 128, 1.5) * freqData.length);
-        const v = freqData[Math.min(idx, freqData.length - 1)] / 255;
-        const angle = (i / 128) * Math.PI * 2 - Math.PI / 2;
-        const inner = ringR - 10;
-        const outer = ringR + v * ringR * 0.8 * depthScale;
-        const rHue = (hue + i * (360 / 128) + depth * 50) % 360;
-        ctx.strokeStyle = `hsla(${rHue},100%,${55 + v * 25}%,${(0.5 + v * 0.5) * depthAlpha})`;
-        ctx.beginPath();
-        ctx.moveTo(ringCX + Math.cos(angle) * inner, ringCY + Math.sin(angle) * inner);
-        ctx.lineTo(ringCX + Math.cos(angle) * outer, ringCY + Math.sin(angle) * outer);
-        ctx.stroke();
-      }
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 128; i++) {
+      const idx = Math.floor(Math.pow(i / 128, 1.5) * freqData.length);
+      const v = freqData[Math.min(idx, freqData.length - 1)] / 255;
+      const angle = (i / 128) * Math.PI * 2 - Math.PI / 2;
+      const outerSpike = ringR + v * ringR * 0.6;
+      const innerSpike = ringR - v * ringR * 0.3; // spikes inward too
+      const rHue = (hue + i * (360 / 128)) % 360;
+      ctx.strokeStyle = `hsla(${rHue},100%,${55 + v * 25}%,${0.5 + v * 0.5})`;
+      ctx.beginPath();
+      ctx.moveTo(ringCX + Math.cos(angle) * innerSpike, ringCY + Math.sin(angle) * innerSpike);
+      ctx.lineTo(ringCX + Math.cos(angle) * outerSpike, ringCY + Math.sin(angle) * outerSpike);
+      ctx.stroke();
     }
+
+    // ── Center Waveform — time-domain oscilloscope through the middle ──
+    if (timeData) {
+      const waveW = ringR * 1.4;
+      const waveH = ringR * 0.5;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.5 + energy * 0.4;
+      ctx.strokeStyle = `hsl(${(hue + 180) % 360},80%,60%)`;
+      ctx.beginPath();
+      const step = Math.max(1, Math.floor(timeData.length / 200));
+      for (let i = 0; i < 200; i++) {
+        const ti = Math.min(i * step, timeData.length - 1);
+        const v = (timeData[ti] / 128.0 - 1.0);
+        const wx = ringCX - waveW / 2 + (i / 200) * waveW;
+        const wy = ringCY + v * waveH * (0.5 + kick * 0.5);
+        if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+      }
+      ctx.stroke();
+      // Second waveform rotated 90 degrees for cross pattern
+      ctx.globalAlpha = 0.3 + energy * 0.3;
+      ctx.strokeStyle = `hsl(${(hue + 90) % 360},70%,55%)`;
+      ctx.beginPath();
+      for (let i = 0; i < 200; i++) {
+        const ti = Math.min(i * step, timeData.length - 1);
+        const v = (timeData[ti] / 128.0 - 1.0);
+        const wy = ringCY - waveW / 2 + (i / 200) * waveW;
+        const wx = ringCX + v * waveH * (0.5 + kick * 0.5);
+        if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Radial Frequency Landscape — circular spectrogram with height = amplitude ──
+    const landR = ringR * 0.55;
+    ctx.lineWidth = 1.5;
+    for (let ring = 0; ring < 3; ring++) {
+      const rr = landR * (0.4 + ring * 0.25);
+      const numPts = 64;
+      ctx.globalAlpha = (0.25 - ring * 0.06) + energy * 0.2;
+      ctx.strokeStyle = `hsl(${(hue + ring * 40) % 360},90%,${50 + ring * 8}%)`;
+      ctx.beginPath();
+      for (let i = 0; i <= numPts; i++) {
+        const angle = (i / numPts) * Math.PI * 2;
+        const fi = Math.floor(Math.pow(i / numPts, 1.8) * freqData.length * 0.5);
+        const v = freqData[Math.min(fi, freqData.length - 1)] / 255;
+        const r = rr + v * landR * 0.4;
+        const px = ringCX + Math.cos(angle) * r;
+        const py = ringCY + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
 
     // Spinning Wireframe Shapes with parallax
     const shapes = [
