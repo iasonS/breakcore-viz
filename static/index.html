@@ -901,6 +901,12 @@ let spectralCentroid = 1000, chaosMetric = 0, cumulativeHue = 0;
 const onsetTimes = [];
 const smoothBars = new Float32Array(CFG.numBars);
 
+// 3A/3B/3C: Spectral analysis state for proper drum vs melodic classification
+let spectralFlux = 0, spectralFlatness = 0, transientScore = 0;
+let prevSpectrumRT = null; // lazy init to match analyser bin count
+const transientBuf = new Float32Array(10); // rolling energy buffer for attack detection
+let transientBufIdx = 0;
+
 function initAudio() {
   if (audioCtx) return;
   try {
@@ -954,6 +960,11 @@ function processAudio() {
       bandPeaks[k] *= 0.98;
     }
 
+    // Read pre-computed spectral analysis (3A/3B/3C)
+    spectralFlux = tl.flux ? tl.flux[f] : 0;
+    spectralFlatness = tl.flatness ? tl.flatness[f] : 0;
+    transientScore = tl.transient ? tl.transient[f] : 0;
+
     // Spectral centroid approximation from band ratios
     spectralCentroid = 200 + bands.low * 800 + bands.mid * 3000 + bands.high * 8000;
     cumulativeHue += totalEnergy() * 0.5;
@@ -986,11 +997,55 @@ function processAudio() {
   analyser.getByteFrequencyData(freqData);
   analyser.getByteTimeDomainData(timeData);
 
+  // 3A: Spectral flux — full-spectrum frame-to-frame positive difference
+  if (!prevSpectrumRT) prevSpectrumRT = new Float32Array(freqData.length);
+  let flux = 0;
+  for (let i = 0; i < freqData.length; i++) {
+    const cur = freqData[i] / 255;
+    const diff = cur - prevSpectrumRT[i];
+    if (diff > 0) flux += diff;
+    prevSpectrumRT[i] = cur;
+  }
+  // Normalize and smooth — sharp spikes = percussive onset
+  spectralFlux += (flux / freqData.length * 10 - spectralFlux) * 0.4;
+
+  // 3B: Spectral flatness — geometric mean / arithmetic mean
+  // 0 = tonal (pitched/melodic), 1 = noise-like (drum/percussion)
+  let logSum = 0, arithSum = 0;
+  const eps = 1e-10;
+  for (let i = 1; i < freqData.length; i++) {
+    const val = Math.max(freqData[i] / 255, eps);
+    logSum += Math.log(val);
+    arithSum += val;
+  }
+  const nBins = freqData.length - 1;
+  const geoMean = Math.exp(logSum / nBins);
+  const arithMean = arithSum / nBins;
+  const rawFlatness = arithMean > eps ? geoMean / arithMean : 0;
+  spectralFlatness += (rawFlatness - spectralFlatness) * 0.3;
+
   const br = CFG.bandRanges;
   const raw = {
     sub: bandEnergy(...br.sub), low: bandEnergy(...br.low),
     mid: bandEnergy(...br.mid), high: bandEnergy(...br.high),
   };
+
+  // 3C: Transient detection — fast energy rise = percussive attack
+  const rawE = raw.sub + raw.low * 0.5 + raw.mid * 0.3 + raw.high * 0.2;
+  transientBuf[transientBufIdx % 10] = rawE;
+  transientBufIdx++;
+  const ti = transientBufIdx;
+  const recent = Math.max(
+    transientBuf[(ti - 1 + 10) % 10],
+    transientBuf[(ti - 2 + 10) % 10],
+    transientBuf[(ti - 3 + 10) % 10]
+  );
+  const older = transientBuf[(ti - 6 + 10) % 10];
+  if (recent > older * 1.5 + 0.02 && recent > 0.05) {
+    transientScore = Math.min(1, (recent - older) * 4);
+  } else {
+    transientScore *= 0.85;
+  }
 
   for (const k of ['sub', 'low', 'mid', 'high']) {
     prevBands[k] = bands[k];
@@ -1181,6 +1236,9 @@ async function analyzeAudioOffline(file) {
     mid: new Float32Array(frameCount),
     high: new Float32Array(frameCount),
     energy: new Float32Array(frameCount),
+    flux: new Float32Array(frameCount),       // 3A: spectral flux per frame
+    flatness: new Float32Array(frameCount),   // 3B: spectral flatness per frame
+    transient: new Float32Array(frameCount),  // 3C: transient score per frame
     frameCount, fps, duration, sampleRate,
   };
 
@@ -1234,6 +1292,7 @@ async function analyzeAudioOffline(file) {
   }
 
   const mag = new Float32Array(halfFFT);
+  const prevMag = new Float32Array(halfFFT); // for spectral flux
   const chunkSize = 1024; // frames per chunk before yielding to UI
   const totalChunks = Math.ceil(frameCount / chunkSize);
 
@@ -1270,6 +1329,28 @@ async function analyzeAudioOffline(file) {
       tl.mid[f] = bandE(midBins[0], midBins[1]);
       tl.high[f] = bandE(highBins[0], highBins[1]);
       tl.energy[f] = Math.min(1, (tl.sub[f] * 2.0 + tl.low[f] * 1.2 + tl.mid[f] * 0.5 + tl.high[f] * 0.3) / 2);
+
+      // 3A: Spectral flux — positive difference from previous frame
+      let fluxSum = 0;
+      for (let k = 0; k < halfFFT; k++) {
+        const diff = mag[k] - prevMag[k];
+        if (diff > 0) fluxSum += diff;
+        prevMag[k] = mag[k];
+      }
+      tl.flux[f] = fluxSum / halfFFT * 10; // normalized, scaled
+
+      // 3B: Spectral flatness — geometric mean / arithmetic mean
+      let lSum = 0, aSum = 0;
+      const epsOff = 1e-10;
+      for (let k = 1; k < halfFFT; k++) {
+        const v = Math.max(mag[k], epsOff);
+        lSum += Math.log(v);
+        aSum += v;
+      }
+      const nB = halfFFT - 1;
+      const gm = Math.exp(lSum / nB);
+      const am = aSum / nB;
+      tl.flatness[f] = am > epsOff ? gm / am : 0;
     }
 
     // Yield to UI for progress updates
@@ -1290,6 +1371,29 @@ async function analyzeAudioOffline(file) {
   // Recompute energy after smoothing
   for (let f = 0; f < frameCount; f++) {
     tl.energy[f] = Math.min(1, (tl.sub[f] * 2.0 + tl.low[f] * 1.2 + tl.mid[f] * 0.5 + tl.high[f] * 0.3) / 2);
+  }
+
+  // Smooth spectral flux and flatness
+  {
+    let pf = 0, pfl = 0;
+    for (let f = 0; f < frameCount; f++) {
+      pf += (tl.flux[f] - pf) * 0.4;
+      tl.flux[f] = pf;
+      pfl += (tl.flatness[f] - pfl) * 0.3;
+      tl.flatness[f] = pfl;
+    }
+  }
+
+  // 3C: Transient detection — fast energy rise within ~3 frames
+  for (let f = 0; f < frameCount; f++) {
+    if (f < 6) { tl.transient[f] = 0; continue; }
+    const recent = Math.max(tl.energy[f], tl.energy[f - 1], tl.energy[f - 2]);
+    const older = tl.energy[f - 5];
+    if (recent > older * 1.5 + 0.02 && recent > 0.05) {
+      tl.transient[f] = Math.min(1, (recent - older) * 4);
+    } else {
+      tl.transient[f] = (f > 0 ? tl.transient[f - 1] : 0) * 0.85;
+    }
   }
 
   showAnalyzeProgress(80, 'Detecting sections...');
@@ -1534,20 +1638,27 @@ function updateSpawns() {
   const th = CFG.onsetThresholds;
   const hueVal = (spectralCentroid - 200) / 3800 * 360 + 180;
 
-  if (kd > th.kick) {
+  // 3A/3B/3C: Gate spawn thresholds by percussion confidence
+  // High flatness + transient = definitely a drum hit → spawn freely
+  // Low flatness = melodic bass → suppress kick/snare spawns
+  const pg = Math.min(1, spectralFlatness * 3.0) * (0.3 + transientScore * 0.7);
+  const kickGated = kd * (0.15 + pg * 0.85);
+  const snareGated = sd * (0.2 + pg * 0.8);
+
+  if (kickGated > th.kick) {
     spawnBurst('kick', 310);
     spawnRing(310);
     spawnTear();
     if (Math.random() < 0.5) spawnTear();
     if (Math.random() < 0.3) spawnTear(true); // center tear
   }
-  if (sd > th.snare) {
+  if (snareGated > th.snare) {
     spawnBurst('snare', 0);
     spawnRing(0);
     if (Math.random() < 0.4) spawnTear();
   }
   if (hd > th.hat) { spawnBurst('hat', hueVal); if (Math.random() < 0.3) spawnTear(); }
-  if (e > CFG.peakEnergyMin && kd > th.peak) {
+  if (e > CFG.peakEnergyMin && kickGated > th.peak) {
     spawnBurst('peak', Math.random() * 360);
     spawnRing(Math.random() * 360);
     spawnTear(); spawnTear(true);
@@ -2234,20 +2345,27 @@ function frame(nowMs) {
       const f = i / CFG.numBars;
       smoothBars[i] = Math.max(0, (1.0 - f) * (0.4 + 0.4 * Math.sin(tt * 3.0 + i * 0.3)));
     }
+    // Synthetic spectral analysis — demo mode simulates drums
+    spectralFlatness = 0.4 + 0.3 * Math.sin(tt * 5.3);
+    spectralFlux = 0.3 + 0.3 * Math.abs(Math.sin(tt * 5.3));
+    transientScore = 0.5 + 0.4 * Math.max(0, Math.sin(tt * 5.3));
   }
 
   const energy = totalEnergy();
   const bm = CFG.bandMultipliers;
-  const kick = Math.min(1, bands.sub * bm.kick);
-  const snare = Math.min(1, bands.low * bm.snare);
-  const hat = Math.min(1, bands.high * bm.hat);
+  // 3A/3B/3C: Percussion gate — high flatness (noise-like) + transient (fast attack) = drum
+  // Low flatness = tonal/melodic content → suppress kick/snare response
+  const percGate = Math.min(1, spectralFlatness * 3.0) * (0.3 + transientScore * 0.7);
+  const kick = Math.min(1, bands.sub * bm.kick * (0.15 + percGate * 0.85));
+  const snare = Math.min(1, bands.low * bm.snare * (0.2 + percGate * 0.8));
+  const hat = Math.min(1, bands.high * bm.hat); // hats are inherently noise-like, minimal gating
   const chaos = chaosMetric;
   const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
   const time = t - t0;
 
-  // ── Impact system — hard kicks trigger distortion ──
+  // ── Impact system — hard kicks trigger distortion (gated by percussion confidence) ──
   const kickDelta = bands.sub - prevKick;
-  if (kickDelta > 0.02 && kick > 0.6) {
+  if (kickDelta * percGate > 0.02 && kick > 0.6) {
     impactIntensity = Math.min(1.0, kick * 1.2);
   }
   impactIntensity *= 0.85; // fast decay
@@ -2268,7 +2386,7 @@ function frame(nowMs) {
     evoPhaseTimer += dt * 0.3;
   } else {
     // Normal: timer + beat triggered
-    if (evoPhaseTimer > CFG.phaseDuration && (kickDelta > 0.01 || evoPhaseTimer > CFG.phaseDuration * 1.5)) {
+    if (evoPhaseTimer > CFG.phaseDuration && (kickDelta * percGate > 0.01 || evoPhaseTimer > CFG.phaseDuration * 1.5)) {
       evoPhaseTimer = 0;
       evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
     }
@@ -2310,7 +2428,7 @@ function frame(nowMs) {
   // ── Forward camera ──
   const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed) * evoSmooth.speedMul * sectionSpeedMul;
   cameraZ += forwardSpeed * dt;
-  if (kickDelta > 0.015) {
+  if (kickDelta * percGate > 0.015) {
     cameraZ += CFG.camKickImpulse * (section === 'drop' ? 3.0 : 1.0);
   }
   cameraSpeed = forwardSpeed;
@@ -2417,7 +2535,7 @@ function frame(nowMs) {
     document.getElementById('hud-res').textContent = `GL:${screenW}x${screenH} Scene:${sceneW}x${sceneH} DPR:${Math.min(window.devicePixelRatio, 2).toFixed(1)}`;
     document.getElementById('hud-energy').textContent = 'Energy: ' + energy.toFixed(2);
     document.getElementById('hud-chaos').textContent = 'Chaos: ' + chaos.toFixed(2);
-    document.getElementById('hud-band').textContent = `K:${kick.toFixed(2)} S:${snare.toFixed(2)} H:${hat.toFixed(2)}`;
+    document.getElementById('hud-band').textContent = `K:${kick.toFixed(2)} S:${snare.toFixed(2)} H:${hat.toFixed(2)} FL:${spectralFlux.toFixed(2)} FT:${spectralFlatness.toFixed(2)} TR:${transientScore.toFixed(2)} PG:${percGate.toFixed(2)}`;
     const shapeNames = ['protein','crystal','jellyfish','blackhole'];
     const phaseNames = CFG.evoPhases.map((_,i) => `P${i}`);
     let extraInfo = `P:${aliveP}/${CFG.maxParticles} Z:${cameraZ.toFixed(0)} Spd:${cameraSpeed.toFixed(1)} Phase:${phaseNames[evoPhaseIdx]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''} [${section.toUpperCase()}]`;
