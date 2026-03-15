@@ -276,11 +276,10 @@ float tunnelWallSDF(vec3 p) {
   return morphedSDF(q, tw) * sc;
 }
 
-// ── Debris: sparks near tunnel walls only ──
+// ── Debris: sparks near tunnel walls ──
 float debrisSDF(vec3 p) {
   vec2 rel = p.xy - uCamXY;
   float r = length(rel);
-  // Only render debris near the tunnel walls, not in center
   if(r < uCorridorR * 0.7) return 20.0;
 
   float a = atan(rel.y, rel.x);
@@ -300,6 +299,32 @@ float debrisSDF(vec3 p) {
 
   float sz = (0.02 + h.y * 0.08) * uObjScale;
   return length(p - objPos) - sz;
+}
+
+// ── Corridor dust: tiny sparks that fly through the center ──
+float dustSDF(vec3 p) {
+  float zPeriod = 1.8;
+  float cellZ = floor(p.z / zPeriod + 0.5);
+  float localZ = p.z - cellZ * zPeriod;
+
+  vec3 h = hash31(vec3(cellZ, 0.0, 777.0));
+  vec3 h2 = hash31(vec3(cellZ, 1.0, 777.0));
+
+  // Spread dust across the corridor with slight bias toward edges
+  float dustR = h.x * uCorridorR * 1.2;
+  float dustA = h.y * 6.283;
+  vec3 dustPos = vec3(
+    uCamXY.x + cos(dustA) * dustR,
+    uCamXY.y + sin(dustA) * dustR,
+    cellZ * zPeriod + (h.z - 0.5) * 0.6
+  );
+
+  // Tiny — these are hyperspace sparks
+  float sz = 0.008 + h2.x * 0.025;
+  // Elongate along Z for streak effect at speed
+  vec3 q = p - dustPos;
+  q.z *= 0.3;
+  return length(q) - sz;
 }
 
 // ── Energy ring: mid-zone ring structure that pulses with beat ──
@@ -325,30 +350,51 @@ float attractorSDF(vec3 p) {
   vec3 bhPos = vec3(uCamXY, uBHZ);
   vec3 rel = p - bhPos;
 
-  // Event horizon sphere — big dark void
+  // Tilt the disk so it's not perfectly edge-on
+  float tilt = 0.35 + sin(uTime * 0.07) * 0.1;
+  rel.xy *= rot2(tilt);
+
   float horizon = length(rel) - uBHSize * 0.4;
 
-  // Accretion disk — wide, flat, spinning
-  float diskR = length(rel.xz) - uBHSize;
-  float disk = sqrt(diskR * diskR + rel.y * rel.y) - uBHSize * 0.08;
-  disk += 0.08 * sin(atan(rel.z, rel.x) * 16.0 + uTime * 6.0) * uEnergy;
-  disk += 0.05 * sin(atan(rel.z, rel.x) * 8.0 - uTime * 3.0) * uKick;
+  // Multi-layered accretion disk
+  float diskAngle = atan(rel.z, rel.x);
+  float diskR2d = length(rel.xz);
 
-  // Inner bright ring
-  float innerRing = abs(length(rel.xz) - uBHSize * 0.6) - uBHSize * 0.03;
+  // Main disk — wide, turbulent
+  float mainDiskR = diskR2d - uBHSize;
+  float mainDisk = sqrt(mainDiskR * mainDiskR + rel.y * rel.y) - uBHSize * 0.06;
+  mainDisk += 0.06 * sin(diskAngle * 16.0 + uTime * 6.0) * uEnergy;
+  mainDisk += 0.04 * sin(diskAngle * 8.0 - uTime * 3.0) * uKick;
+  mainDisk += 0.03 * sin(diskAngle * 24.0 + uTime * 10.0) * uHat;
 
-  // Outer ring
-  float outerRing = abs(length(rel.xz) - uBHSize * 1.4) - uBHSize * 0.02;
+  // Inner hot ring — tight, bright, fast-spinning
+  float innerRing = abs(diskR2d - uBHSize * 0.55) - uBHSize * 0.025;
+  innerRing = sqrt(innerRing * innerRing + rel.y * rel.y * 4.0);
+  innerRing += 0.02 * sin(diskAngle * 20.0 + uTime * 12.0);
 
-  return min(horizon, min(disk, min(innerRing, outerRing)));
+  // Mid ring
+  float midRing = abs(diskR2d - uBHSize * 0.8) - uBHSize * 0.02;
+  midRing = sqrt(midRing * midRing + rel.y * rel.y * 4.0);
+
+  // Outer ring — faint, wide
+  float outerRing = abs(diskR2d - uBHSize * 1.5) - uBHSize * 0.04;
+  outerRing = sqrt(outerRing * outerRing + rel.y * rel.y * 2.0);
+
+  // Far outer halo
+  float haloRing = abs(diskR2d - uBHSize * 2.0) - uBHSize * 0.03;
+  haloRing = sqrt(haloRing * haloRing + rel.y * rel.y);
+
+  return min(horizon, min(mainDisk, min(innerRing, min(midRing, min(outerRing, haloRing)))));
 }
 
 // ── Combined Scene ──
 float sceneSDF(vec3 p) {
   float tw = tunnelWallSDF(p);
   float db = debrisSDF(p);
+  float du = dustSDF(p);
+  float er = energyRingSDF(p);
   float bh = attractorSDF(p);
-  return min(bh, min(tw, db));
+  return min(bh, min(er, min(du, min(tw, db))));
 }
 
 void main() {
@@ -383,7 +429,7 @@ void main() {
   float fov = 1.5 + uEnergy*0.5 + uKick*0.3;
   vec3 rd = normalize(fwd*fov + uv.x*right + uv.y*up);
 
-  // Gravitational lensing — intensifies as you approach the BH
+  // Gravitational lensing — strong, Elite Dangerous style
   vec3 bhPos = vec3(uCamXY, uBHZ);
   vec3 toBH = bhPos - ro;
   float bhDist = length(toBH);
@@ -391,12 +437,12 @@ void main() {
   float alignment = dot(rd, bhDir);
   vec3 perpToBH = rd - bhDir * alignment;
   float lensR = length(perpToBH);
-  if(lensR > 0.001 && bhDist > 1.0) {
-    // Lensing grows stronger as BH gets closer + kicks pulse it
-    float proximity = 8.0 / max(bhDist, 3.0);
-    float lensStrength = uBHSize * 0.12 / (lensR * bhDist + 0.5);
-    lensStrength *= proximity * (1.0 + uKick * 1.5 + uEnergy * 0.5);
-    rd = normalize(rd + perpToBH / lensR * min(lensStrength, 0.3));
+  if(lensR > 0.001 && bhDist > 0.5) {
+    float proximity = 12.0 / max(bhDist, 1.5);
+    float lensStrength = uBHSize * 0.25 / (lensR * bhDist + 0.3);
+    lensStrength *= proximity * (1.0 + uKick * 2.0 + uEnergy * 0.8);
+    // Stronger cap — let the warp get dramatic
+    rd = normalize(rd + perpToBH / lensR * min(lensStrength, 0.6));
   }
 
   // Raymarch with volumetric glow accumulation
@@ -413,9 +459,9 @@ void main() {
     // Volumetric glow — objects emit light proportional to proximity
     glowAccum += exp(-abs(d) * 5.0) * 0.02 * (1.0 + uEnergy);
 
-    // Track proximity to black hole for special glow
+    // Track proximity to black hole for special glow — scales with BH size
     float bhProx = length(p - bhPos);
-    bhGlow += exp(-bhProx * 0.3 / uBHSize) * 0.008 * (1.0 + uKick * 2.0);
+    bhGlow += exp(-bhProx * 0.2 / max(uBHSize, 0.5)) * 0.012 * (1.0 + uKick * 2.5);
 
     if(abs(d) < SURF) { hit = true; break; }
     dist += abs(d)*0.7;
@@ -438,34 +484,49 @@ void main() {
   if(hit) {
     float dW = tunnelWallSDF(p);
     float dD = debrisSDF(p);
+    float dDu = dustSDF(p);
+    float dER = energyRingSDF(p);
     float dBH = attractorSDF(p);
-    float nearest = min(dW, min(dD, dBH));
+    float nearest = min(dW, min(dD, min(dDu, min(dER, dBH))));
 
     vec3 surfCol;
     if(abs(dBH - nearest) < 0.02) {
       // Black hole
       vec3 bhRel = p - bhPos;
+      float tilt = 0.35 + sin(uTime * 0.07) * 0.1;
+      bhRel.xy *= rot2(tilt);
       float distFromCenter = length(bhRel);
-      float diskDist = abs(length(bhRel.xz) - uBHSize);
+      float diskR2d = length(bhRel.xz);
       if(distFromCenter < uBHSize * 0.35) {
-        surfCol = vec3(0.0); // event horizon = void
+        surfCol = vec3(0.0);
       } else {
-        // Accretion disk — bright but controlled
-        float heat = exp(-diskDist * 3.0 / uBHSize);
+        float heat = exp(-abs(diskR2d - uBHSize) * 2.0 / uBHSize);
+        float innerHeat = exp(-abs(diskR2d - uBHSize * 0.55) * 4.0 / uBHSize);
         float spin = sin(atan(bhRel.z, bhRel.x) * 12.0 + uTime * 6.0);
+        float spin2 = sin(atan(bhRel.z, bhRel.x) * 20.0 + uTime * 12.0);
+        // Inner ring burns white-hot, outer is colored
+        vec3 innerCol = vec3(1.0, 0.95, 0.85) * (2.0 + uKick * 1.5);
         surfCol = mix(kickCol, bhCol, heat);
-        surfCol *= (1.5 + uKick * 1.0 + spin * 0.3 * uEnergy);
+        surfCol = mix(surfCol, innerCol, innerHeat);
+        surfCol *= (1.5 + uKick * 1.0 + spin * 0.3 * uEnergy + spin2 * 0.15 * uHat);
       }
+    } else if(abs(dER - nearest) < 0.02) {
+      // Energy rings — hot white-cyan, pulse with kick
+      float ringGlow = 1.5 + uKick * 2.0 + uEnergy * 1.0;
+      surfCol = mix(vec3(0.3, 0.8, 1.0), vec3(1.0, 0.6, 0.9), uKick * 0.6 + sin(uTime * 2.0) * 0.3);
+      surfCol *= ringGlow;
+    } else if(abs(dDu - nearest) < 0.02) {
+      // Corridor dust — bright white-blue sparks, flash on hats
+      surfCol = mix(vec3(0.7, 0.85, 1.0), hatCol, 0.3) * (2.0 + uHat * 3.0 + uEnergy);
     } else if(abs(dW - nearest) < 0.02) {
-      // Tunnel walls — FLASH on kicks, shift hue with snare
+      // Tunnel walls
       float posHue = sin(p.x*0.5+uTime)*0.15 + sin(p.z*0.3-uTime*0.7)*0.1;
       surfCol = hsl(fract(uHue/360.0 + posHue + uSnare*0.1), 0.9 + uKick*0.1, 0.4 + uKick*0.2);
       surfCol = mix(surfCol, kickCol, uKick * 0.5);
       surfCol = mix(surfCol, hatCol, uHat * 0.3);
-      // Pulse brightness on beat
       surfCol *= 0.7 + uKick * 1.0 + uEnergy * 0.5;
     } else {
-      // Debris — sparkle with hats
+      // Debris
       surfCol = mix(hatCol, snareCol, 0.5) * (1.0 + uHat * 2.0);
     }
 
@@ -477,8 +538,8 @@ void main() {
     col += rimCol * smoothstep(0.01, 0.05, minDist) * (0.3 + uKick * 0.5);
   }
 
-  // Black hole volumetric glow — halo that grows as you approach
-  col += bhCol * min(bhGlow, 0.4) * (1.0 + uKick * 1.5);
+  // Black hole volumetric glow — scales with BH size
+  col += bhCol * min(bhGlow, 0.8) * (1.0 + uKick * 2.0);
 
   // Volumetric glow from all objects — holographic wireframe feel
   vec3 glowCol = mix(kickCol, hatCol, 0.5+0.5*sin(uTime*0.5));
@@ -1357,22 +1418,21 @@ function frame(nowMs) {
   const camDriftX = Math.sin(time * 0.23) * 2.0 + Math.cos(time * 0.17) * 1.5 + mOff[0] * 2.0;
   const camDriftY = Math.sin(time * 0.19) * 1.5 + Math.cos(time * 0.31) * 1.0 - mOff[1] * 1.5;
 
-  // Black hole: FIXED target — you approach it, pass through, new one spawns
-  const bhDist = bhWorldZ - cameraZ; // how far ahead the BH is
-  if (bhDist < 2.0) {
-    // Passed through — flash and spawn new one further ahead
+  // Black hole: you approach it, pass through, new one spawns further ahead
+  const bhDist = bhWorldZ - cameraZ;
+  if (bhDist < 1.0) {
     bhPassFlash = 1.0;
-    bhWorldZ = cameraZ + 35.0 + Math.random() * 25.0;
+    bhWorldZ = cameraZ + 50.0 + Math.random() * 40.0;
     // Trigger evolution phase change on passage
     evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
     evoPhaseTimer = 0;
   }
   bhPassFlash *= 0.92; // decay the flash
 
-  // BH apparent size grows as you approach — capped so it doesn't fill the screen
-  const bhApproachFactor = Math.max(0.2, Math.min(1.0, 15.0 / Math.max(bhDist, 1.0)));
+  // BH grows as you approach — no hard cap, should feel massive up close
+  const bhApproachFactor = Math.max(0.15, 15.0 / Math.max(bhDist, 0.5));
   const bhZ = bhWorldZ;
-  const bhSize = (1.5 + energy * 0.8 + kick * 0.5) * bhApproachFactor;
+  const bhSize = (2.0 + energy * 1.2 + kick * 0.8) * Math.min(bhApproachFactor, 4.0);
 
   // ── Shape morphing ──
   shapeTimer += dt;
