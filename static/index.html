@@ -488,7 +488,7 @@ void main() {
   vec3 up = cross(right, fwd);
 
   // FOV breathes with energy — widens on drops
-  float fov = 1.5 + uEnergy*0.5 + uKick*0.3;
+  float fov = 1.5 + uKick*0.5;
   vec3 rd = normalize(fwd*fov + uv.x*right + uv.y*up);
 
   // Gravitational lensing — strong, Elite Dangerous style
@@ -502,7 +502,7 @@ void main() {
   if(lensR > 0.001 && bhDist > 0.5) {
     float proximity = 12.0 / max(bhDist, 1.5);
     float lensStrength = uBHSize * 0.25 / (lensR * bhDist + 0.3);
-    lensStrength *= proximity * (1.0 + uKick * 2.0 + uEnergy * 0.8);
+    lensStrength *= proximity * (1.0 + uKick * 2.5);
     // Stronger cap — let the warp get dramatic
     rd = normalize(rd + perpToBH / lensR * min(lensStrength, 0.6));
   }
@@ -568,19 +568,19 @@ void main() {
         float spin = sin(atan(bhRel.z, bhRel.x) * 12.0 + uTime * 6.0);
         float spin2 = sin(atan(bhRel.z, bhRel.x) * 20.0 + uTime * 12.0);
         // Inner ring burns white-hot, outer is colored
-        vec3 innerCol = vec3(1.0, 0.95, 0.85) * (2.0 + uKick * 1.5);
+        vec3 innerCol = vec3(1.0, 0.95, 0.85) * (0.4 + uKick * 3.0);
         surfCol = mix(kickCol, bhCol, heat);
         surfCol = mix(surfCol, innerCol, innerHeat);
-        surfCol *= (1.5 + uKick * 1.0 + spin * 0.3 * uEnergy + spin2 * 0.15 * uHat);
+        surfCol *= (0.3 + uKick * 2.0 + spin * 0.3 * uKick + spin2 * 0.15 * uHat);
       }
     } else if(abs(dER - nearest) < 0.02) {
       // Energy rings — hot white-cyan, pulse with kick
-      float ringGlow = 1.5 + uKick * 2.0 + uEnergy * 1.0;
+      float ringGlow = 0.3 + uKick * 2.5;
       surfCol = mix(vec3(0.3, 0.8, 1.0), vec3(1.0, 0.6, 0.9), uKick * 0.6 + sin(uTime * 2.0) * 0.3);
       surfCol *= ringGlow;
     } else if(abs(dDu - nearest) < 0.02) {
       // Corridor dust — bright white-blue sparks, flash on hats
-      surfCol = mix(vec3(0.7, 0.85, 1.0), hatCol, 0.3) * (2.0 + uHat * 3.0 + uEnergy);
+      surfCol = mix(vec3(0.7, 0.85, 1.0), hatCol, 0.3) * (0.4 + uKick*1.5 + uHat*2.0);
     } else if(abs(dMG - nearest) < 0.02) {
       // Megastructures — dark silhouettes with edge glow
       vec3 megaEdge = hsl(fract(uHue/360.0 + 0.15), 0.6, 0.3);
@@ -594,13 +594,13 @@ void main() {
       surfCol = hsl(fract(uHue/360.0 + posHue + uSnare*0.1), 0.9 + uKick*0.1, 0.4 + uKick*0.2);
       surfCol = mix(surfCol, kickCol, uKick * 0.5);
       surfCol = mix(surfCol, hatCol, uHat * 0.3);
-      surfCol *= 0.7 + uKick * 1.0 + uEnergy * 0.5;
+      surfCol *= 0.25 + uKick * 1.5;
     } else {
       // Debris
-      surfCol = mix(hatCol, snareCol, 0.5) * (1.0 + uHat * 2.0);
+      surfCol = mix(hatCol, snareCol, 0.5) * (0.3 + uKick*0.8 + uHat*1.5);
     }
 
-    float glow = 2.5 / (1.0 + dist*dist*0.06);
+    float glow = (0.5 + uKick*2.0) / (1.0 + dist*dist*0.06);
     col = surfCol * glow;
 
     // Edge rim that pulses with beat
@@ -609,7 +609,7 @@ void main() {
   }
 
   // Black hole volumetric glow — scales with BH size
-  col += bhCol * min(bhGlow, 0.8) * (1.0 + uKick * 2.0);
+  col += bhCol * min(bhGlow, 0.8) * (0.2 + uKick * 2.0);
 
   // Volumetric glow from all objects — holographic wireframe feel
   vec3 glowCol = mix(kickCol, hatCol, 0.5+0.5*sin(uTime*0.5));
@@ -617,7 +617,7 @@ void main() {
 
   // Near-miss halo
   float nearGlow = min(0.05/(0.01+minDist*minDist), 0.8);
-  col += glowCol * nearGlow * (0.2 + uEnergy * 0.3);
+  col += glowCol * nearGlow * (0.05 + uKick * 0.3);
 
   // Kick flash — whole scene brightens on beat
   col += kickCol * uKick * 0.08;
@@ -1219,7 +1219,7 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
   const lensRadius = W * 0.15 * bhProximity * (1.0 + kick * 0.5);
 
   // Forward-streaming starfield with gravitational lensing
-  const starSpeed = 0.5 + energy * 3.0 + cameraSpeed * 0.05;
+  const starSpeed = 0.3 + kick * 2.0 + energy * 1.0 + cameraSpeed * 0.05;
   for (const s of stars) {
     s.dist += s.speed * starSpeed * dt;
     if (s.dist > 1.5) {
@@ -1251,7 +1251,7 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       s._lensed = 0;
     }
 
-    const alpha = Math.min(1, s.dist * 2) * (0.25 + energy * 0.4);
+    const alpha = Math.min(1, s.dist * 2) * (0.15 + kick * 0.25 + energy * 0.15);
     const sz = s.size * (0.3 + s.dist * 2.5);
 
     const dx = x - vpX;
@@ -1339,7 +1339,7 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       const waveW = ringR * 1.4;
       const waveH = ringR * 0.5;
       ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.5 + energy * 0.4;
+      ctx.globalAlpha = 0.2 + kick * 0.5 + energy * 0.15;
       ctx.strokeStyle = `hsl(${(hue + 180) % 360},80%,60%)`;
       ctx.beginPath();
       const step = Math.max(1, Math.floor(timeData.length / 200));
