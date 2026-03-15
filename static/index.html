@@ -1095,7 +1095,13 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
   const vpX = cx + (smoothMouseX - 0.5) * W * 0.3;
   const vpY = cy + (smoothMouseY - 0.5) * H * 0.3;
 
-  // Forward-streaming starfield from vanishing point
+  // BH screen position — roughly at vanishing point, offset by look perturbation
+  const bhScreenX = vpX + Math.sin(overlayTime * 0.1) * W * 0.02;
+  const bhScreenY = vpY + Math.cos(overlayTime * 0.13) * H * 0.02;
+  const bhProximity = Math.min(1.0, 10.0 / Math.max(bhWorldZ - cameraZ, 1.0));
+  const lensRadius = W * 0.15 * bhProximity * (1.0 + kick * 0.5);
+
+  // Forward-streaming starfield with gravitational lensing
   const starSpeed = 0.5 + energy * 3.0 + cameraSpeed * 0.05;
   for (const s of stars) {
     s.dist += s.speed * starSpeed * dt;
@@ -1104,28 +1110,75 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       s.angle = Math.random() * Math.PI * 2;
       s.hue = hue + Math.random() * 60;
     }
-    const x = vpX + Math.cos(s.angle) * s.dist * W * 0.65;
-    const y = vpY + Math.sin(s.angle) * s.dist * H * 0.65;
+    let x = vpX + Math.cos(s.angle) * s.dist * W * 0.65;
+    let y = vpY + Math.sin(s.angle) * s.dist * H * 0.65;
+
+    // Gravitational lensing — bend stars around BH screen position
+    const toBHx = bhScreenX - x;
+    const toBHy = bhScreenY - y;
+    const toBHdist = Math.sqrt(toBHx * toBHx + toBHy * toBHy) || 1;
+    if (toBHdist < lensRadius * 3.0 && bhProximity > 0.1) {
+      const lensStr = lensRadius * 40.0 / (toBHdist * toBHdist + lensRadius * 0.5);
+      // Deflect tangentially (perpendicular to radial direction)
+      const tangX = -toBHy / toBHdist;
+      const tangY = toBHx / toBHdist;
+      x += tangX * lensStr * bhProximity;
+      y += tangY * lensStr * bhProximity;
+      // Stars very close to BH get smeared into arcs — boost alpha + streak
+      if (toBHdist < lensRadius) {
+        s._lensed = Math.min(1.0, lensRadius / (toBHdist + 1.0));
+      } else {
+        s._lensed = 0;
+      }
+    } else {
+      s._lensed = 0;
+    }
+
     const alpha = Math.min(1, s.dist * 2) * (0.4 + energy * 0.6);
     const sz = s.size * (0.3 + s.dist * 2.5);
 
-    // Draw as streaks pointing away from vanishing point
     const dx = x - vpX;
     const dy = y - vpY;
     const len = Math.sqrt(dx * dx + dy * dy) || 1;
     const nx = dx / len;
     const ny = dy / len;
-    const streakLen = s.dist * starSpeed * 2.5;
+    // Lensed stars get longer streaks
+    const streakLen = s.dist * starSpeed * 2.5 * (1.0 + s._lensed * 3.0);
 
-    ctx.globalAlpha = alpha;
-    ctx.strokeStyle = `hsl(${s.hue},80%,70%)`;
-    ctx.lineWidth = sz * 0.4;
+    ctx.globalAlpha = alpha * (1.0 + s._lensed * 0.5);
+    const starLit = 70 + Math.floor(s._lensed * 20);
+    ctx.strokeStyle = `hsl(${s.hue},${80 + Math.floor(s._lensed * 20)}%,${starLit}%)`;
+    ctx.lineWidth = sz * (0.4 + s._lensed * 0.6);
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x - nx * streakLen, y - ny * streakLen);
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+
+  // Hyperspace tunnel lines on sustained high energy
+  if (energy > 0.4) {
+    const tunnelIntensity = Math.min(1.0, (energy - 0.4) / 0.4);
+    const numLines = 24;
+    ctx.lineWidth = 1.0 + tunnelIntensity;
+    for (let i = 0; i < numLines; i++) {
+      const a = (i / numLines) * Math.PI * 2 + overlayTime * 0.15;
+      const innerR = 0.05 + tunnelIntensity * 0.02;
+      const outerR = 0.3 + tunnelIntensity * 0.5;
+      const x1 = vpX + Math.cos(a) * innerR * W;
+      const y1 = vpY + Math.sin(a) * innerR * H;
+      const x2 = vpX + Math.cos(a) * outerR * W;
+      const y2 = vpY + Math.sin(a) * outerR * H;
+      const lineHue = (hue + i * (360 / numLines)) % 360;
+      ctx.globalAlpha = tunnelIntensity * (0.08 + kick * 0.12);
+      ctx.strokeStyle = `hsl(${lineHue},60%,50%)`;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
 
   if (isPlaying && freqData) {
     // Side Frequency Bars
