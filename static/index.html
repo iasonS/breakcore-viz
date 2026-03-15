@@ -519,7 +519,7 @@ void main() {
     minDist = min(minDist, abs(d));
 
     // Volumetric glow — objects emit light proportional to proximity
-    glowAccum += exp(-abs(d) * 5.0) * 0.02 * (1.0 + uEnergy);
+    glowAccum += exp(-abs(d) * 5.0) * 0.01 * (0.3 + uKick * 1.7);
 
     // Track proximity to black hole for special glow — scales with BH size
     float bhProx = length(p - bhPos);
@@ -613,7 +613,7 @@ void main() {
 
   // Volumetric glow from all objects — holographic wireframe feel
   vec3 glowCol = mix(kickCol, hatCol, 0.5+0.5*sin(uTime*0.5));
-  col += glowCol * glowAccum * (0.6 + uEnergy);
+  col += glowCol * glowAccum * (0.3 + uKick * 0.7);
 
   // Near-miss halo
   float nearGlow = min(0.05/(0.01+minDist*minDist), 0.8);
@@ -723,13 +723,15 @@ void main() {
     total += w * 2.0;
   }
   bloom = max(bloom/total - ${CFG.post.bloomThreshold.toFixed(1)}, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
-  col += bloom * (0.2 + uKick * ${CFG.post.bloomKickBoost.toFixed(2)});
+  col += bloom * (0.05 + uKick * 0.35);
 
-  // Feedback trail — zoom punch on impact
-  float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.006 - uImpact * 0.02;
+  // Feedback trail — kick makes it linger, no-kick fades fast
+  float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.004 - uImpact * 0.02;
   vec2 prevUV = crtDistort((vUV - 0.5) * feedbackZoom + 0.5);
-  vec3 prev = texture(uPrev, prevUV).rgb * ${CFG.post.feedbackDecay.toFixed(2)};
-  col = mix(col, prev, ${CFG.post.feedbackBlend.toFixed(2)});
+  float kickDecay = ${CFG.post.feedbackDecay.toFixed(2)} - 0.15 * (1.0 - uKick);
+  vec3 prev = texture(uPrev, prevUV).rgb * kickDecay;
+  float kickBlend = 0.08 + uKick * 0.2;
+  col = mix(col, prev, kickBlend);
 
   // VHS glitch
   if (uChaos > 0.4) {
@@ -1346,18 +1348,6 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
         const v = (timeData[ti] / 128.0 - 1.0);
         const wx = ringCX - waveW / 2 + (i / 200) * waveW;
         const wy = ringCY + v * waveH * (0.5 + kick * 0.5);
-        if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
-      }
-      ctx.stroke();
-      // Second waveform rotated 90 degrees for cross pattern
-      ctx.globalAlpha = 0.3 + energy * 0.3;
-      ctx.strokeStyle = `hsl(${(hue + 90) % 360},70%,55%)`;
-      ctx.beginPath();
-      for (let i = 0; i < 200; i++) {
-        const ti = Math.min(i * step, timeData.length - 1);
-        const v = (timeData[ti] / 128.0 - 1.0);
-        const wy = ringCY - waveW / 2 + (i / 200) * waveW;
-        const wx = ringCX + v * waveH * (0.5 + kick * 0.5);
         if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
       }
       ctx.stroke();
