@@ -19,9 +19,25 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 #drop-zone div{color:#0f0;font:24px 'Courier New',monospace;border:2px dashed rgba(0,255,0,.4);
   padding:60px 80px;text-align:center}
 #drop-zone div small{display:block;margin-top:8px;font-size:13px;color:rgba(0,255,0,.5)}
+.mode-btn{font:18px 'Courier New',monospace;color:#0f0;background:rgba(0,255,0,.08);
+  border:1px solid rgba(0,255,0,.4);padding:14px 32px;cursor:pointer;margin:8px;
+  transition:all .2s;position:relative;overflow:hidden}
+.mode-btn:hover{background:rgba(0,255,0,.2);border-color:rgba(0,255,0,.8);
+  box-shadow:0 0 20px rgba(0,255,0,.15);transform:scale(1.03)}
+.mode-btn:active{transform:scale(0.97)}
+.mode-btn.recommended{border-color:rgba(0,255,0,.7);background:rgba(0,255,0,.12)}
+.mode-btn .label{display:block;font-size:18px}
+.mode-btn .desc{display:block;font-size:11px;color:rgba(0,255,0,.5);margin-top:4px}
 #error{position:fixed;bottom:20px;left:20px;right:20px;z-index:30;color:#f44;
   font:13px 'Courier New',monospace;background:rgba(0,0,0,.9);padding:12px;
   border:1px solid #f44;display:none;max-height:200px;overflow:auto;white-space:pre-wrap}
+#analyze-overlay{position:fixed;inset:0;z-index:25;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.92);transition:opacity .4s}
+#analyze-overlay.hidden{opacity:0;pointer-events:none}
+#analyze-overlay .inner{color:#0f0;font:18px 'Courier New',monospace;text-align:center;width:320px}
+#analyze-overlay .bar-bg{width:100%;height:6px;background:rgba(0,255,0,.15);margin-top:16px;border:1px solid rgba(0,255,0,.3)}
+#analyze-overlay .bar-fill{height:100%;background:#0f0;width:0%;transition:width .15s}
+#analyze-overlay .status{margin-top:10px;font-size:12px;color:rgba(0,255,0,.6)}
 </style>
 </head>
 <body>
@@ -36,6 +52,13 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
   <div id="hud-extra">P: 0</div>
 </div>
 <div id="drop-zone"><div>DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small></div></div>
+<div id="analyze-overlay" class="hidden">
+  <div class="inner">
+    <div id="analyze-label">ANALYZING AUDIO...</div>
+    <div class="bar-bg"><div class="bar-fill" id="analyze-bar"></div></div>
+    <div class="status" id="analyze-status">Decoding...</div>
+  </div>
+</div>
 <div id="error"></div>
 
 <script>
@@ -912,7 +935,54 @@ function totalEnergy() {
 }
 
 function processAudio() {
-  if (!analyser || !isPlaying) return;
+  if (!isPlaying) return;
+
+  // Offline mode: read pre-computed timeline
+  if (offlineMode && offlineTimeline) {
+    const f = getOfflineFrame();
+    if (f < 0) return;
+    const tl = offlineTimeline;
+
+    for (const k of ['sub', 'low', 'mid', 'high']) {
+      prevBands[k] = bands[k];
+      bands[k] = tl[k][f];
+      const delta = bands[k] - prevBands[k];
+      if (delta > bandPeaks[k] * 0.15 + 0.003) {
+        bandPeaks[k] = Math.max(bandPeaks[k], bands[k]);
+        onsetTimes.push(performance.now());
+      }
+      bandPeaks[k] *= 0.98;
+    }
+
+    // Spectral centroid approximation from band ratios
+    spectralCentroid = 200 + bands.low * 800 + bands.mid * 3000 + bands.high * 8000;
+    cumulativeHue += totalEnergy() * 0.5;
+
+    const now = performance.now();
+    while (onsetTimes.length && onsetTimes[0] < now - 1000) onsetTimes.shift();
+    chaosMetric = Math.min(1, onsetTimes.length / 15);
+
+    // Synthetic smoothBars from band data for spectrum ring
+    for (let i = 0; i < CFG.numBars; i++) {
+      const t = i / CFG.numBars;
+      let val;
+      if (t < 0.15) val = bands.sub * (1 - t / 0.15) + bands.low * (t / 0.15);
+      else if (t < 0.4) val = bands.low * (1 - (t - 0.15) / 0.25) + bands.mid * ((t - 0.15) / 0.25);
+      else val = bands.mid * (1 - (t - 0.4) / 0.6) + bands.high * ((t - 0.4) / 0.6);
+      val *= 0.8 + 0.2 * Math.sin(f * 0.1 + i * 0.5); // add variation
+      smoothBars[i] += (val - smoothBars[i]) * 0.3;
+    }
+
+    // Also feed real-time analyser if available (for freqData used by overlay)
+    if (analyser) {
+      analyser.getByteFrequencyData(freqData);
+      analyser.getByteTimeDomainData(timeData);
+    }
+    return;
+  }
+
+  // Real-time mode: original behavior
+  if (!analyser) return;
   analyser.getByteFrequencyData(freqData);
   analyser.getByteTimeDomainData(timeData);
 
@@ -971,6 +1041,32 @@ const energyHistory = {
 };
 
 function updateSongSection(dt) {
+  // Offline mode: read pre-computed section data with look-ahead
+  if (offlineMode && offlineSections) {
+    const f = getOfflineFrame();
+    if (f >= 0) {
+      energyHistory.prevSection = energyHistory.section;
+      energyHistory.section = SECTION_NAMES[offlineSections.section[f]];
+      energyHistory.avg = offlineTimeline ? offlineTimeline.energy[f] : 0;
+      energyHistory.ratio = energyHistory.avg > 0.01 ? totalEnergy() / energyHistory.avg : 1.0;
+      // Compute trend from offline data
+      const fps = offlineTimeline ? offlineTimeline.fps : 60;
+      if (f > 60 && offlineTimeline) {
+        const recent30 = f, older30 = Math.max(0, f - 30);
+        let rSum = 0, oSum = 0;
+        for (let i = Math.max(0, f - 30); i < f; i++) rSum += offlineTimeline.energy[i];
+        for (let i = Math.max(0, f - 60); i < Math.max(0, f - 30); i++) oSum += offlineTimeline.energy[i];
+        energyHistory.trend = (rSum - oSum) / 30;
+      }
+      // Use look-ahead timing for trendDuration approximation
+      const ttd = offlineSections.timeToNextDrop[f];
+      energyHistory.trendDuration = energyHistory.section === 'buildup' ?
+        (offlineSections.sectionProgress[f] * 4) : 0; // approximate buildup duration
+    }
+    return;
+  }
+
+  // Real-time mode: original behavior
   const e = totalEnergy();
   const buf = energyHistory.buffer;
   buf[energyHistory.idx] = e;
@@ -1021,6 +1117,377 @@ function updateSongSection(dt) {
     energyHistory.section = 'sustain';
   }
 }
+
+// ─── Offline Analysis Pipeline (Phase 2A+2B) ────────────────────────
+const analyzeOverlay = document.getElementById('analyze-overlay');
+const analyzeBar = document.getElementById('analyze-bar');
+const analyzeStatus = document.getElementById('analyze-status');
+const analyzeLabel = document.getElementById('analyze-label');
+
+// Timeline: pre-computed per-frame audio data (null = real-time mode)
+let offlineTimeline = null;  // { sub, low, mid, high, energy, frameCount, fps, duration, sampleRate }
+let offlineSections = null;  // { section, timeToNextDrop, timeSinceLastDrop, timeToNextBreakdown, bpm }
+let offlineMode = false;     // true when playing with pre-analyzed data
+let offlineFile = null;      // stash the File for replay
+
+function showAnalyzeProgress(pct, status) {
+  analyzeOverlay.classList.remove('hidden');
+  analyzeBar.style.width = pct + '%';
+  analyzeStatus.textContent = status;
+}
+function hideAnalyzeProgress() {
+  analyzeOverlay.classList.add('hidden');
+}
+
+// 2A: Decode full audio and compute per-frame band energies
+async function analyzeAudioOffline(file) {
+  offlineFile = file;
+  showAnalyzeProgress(0, 'Decoding audio...');
+
+  const arrayBuf = await file.arrayBuffer();
+  const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+  let decoded;
+  try {
+    decoded = await tempCtx.decodeAudioData(arrayBuf.slice(0)); // slice to avoid detached buffer
+  } catch (e) {
+    showError('Decode failed: ' + e.message);
+    hideAnalyzeProgress();
+    return null;
+  }
+  tempCtx.close();
+
+  const sampleRate = decoded.sampleRate;
+  const duration = decoded.duration;
+  const fps = 60;
+  const samplesPerFrame = Math.round(sampleRate / fps);
+  const frameCount = Math.ceil(decoded.length / samplesPerFrame);
+  const fftSize = CFG.fftSize;
+  const halfFFT = fftSize / 2;
+
+  showAnalyzeProgress(5, `Analyzing ${frameCount} frames (${duration.toFixed(1)}s)...`);
+
+  // Mix down to mono
+  const mono = new Float32Array(decoded.length);
+  const numCh = decoded.numberOfChannels;
+  for (let ch = 0; ch < numCh; ch++) {
+    const chData = decoded.getChannelData(ch);
+    for (let i = 0; i < chData.length; i++) mono[i] += chData[i] / numCh;
+  }
+
+  // Pre-allocate timeline arrays
+  const tl = {
+    sub: new Float32Array(frameCount),
+    low: new Float32Array(frameCount),
+    mid: new Float32Array(frameCount),
+    high: new Float32Array(frameCount),
+    energy: new Float32Array(frameCount),
+    frameCount, fps, duration, sampleRate,
+  };
+
+  // Frequency bin helpers
+  const binFor = hz => Math.round(hz / (sampleRate / fftSize));
+  const br = CFG.bandRanges;
+  const subBins = [Math.max(0, binFor(br.sub[0])), Math.min(binFor(br.sub[1]), halfFFT - 1)];
+  const lowBins = [Math.max(0, binFor(br.low[0])), Math.min(binFor(br.low[1]), halfFFT - 1)];
+  const midBins = [Math.max(0, binFor(br.mid[0])), Math.min(binFor(br.mid[1]), halfFFT - 1)];
+  const highBins = [Math.max(0, binFor(br.high[0])), Math.min(binFor(br.high[1]), halfFFT - 1)];
+
+  // Hann window
+  const hann = new Float32Array(fftSize);
+  for (let i = 0; i < fftSize; i++) hann[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (fftSize - 1)));
+
+  // Cooley-Tukey radix-2 FFT (in-place, iterative)
+  const fftRe = new Float32Array(fftSize);
+  const fftIm = new Float32Array(fftSize);
+  const log2N = Math.log2(fftSize) | 0;
+
+  function fftInPlace() {
+    // Bit-reversal permutation
+    for (let i = 0; i < fftSize; i++) {
+      let j = 0;
+      for (let b = 0; b < log2N; b++) j |= ((i >> b) & 1) << (log2N - 1 - b);
+      if (j > i) {
+        let tmp = fftRe[i]; fftRe[i] = fftRe[j]; fftRe[j] = tmp;
+        tmp = fftIm[i]; fftIm[i] = fftIm[j]; fftIm[j] = tmp;
+      }
+    }
+    // Butterfly stages
+    for (let s = 1; s <= log2N; s++) {
+      const m = 1 << s;
+      const mh = m >> 1;
+      const wRe = Math.cos(-2 * Math.PI / m);
+      const wIm = Math.sin(-2 * Math.PI / m);
+      for (let k = 0; k < fftSize; k += m) {
+        let tRe = 1, tIm = 0;
+        for (let j = 0; j < mh; j++) {
+          const uRe = fftRe[k + j], uIm = fftIm[k + j];
+          const vRe = tRe * fftRe[k + j + mh] - tIm * fftIm[k + j + mh];
+          const vIm = tRe * fftIm[k + j + mh] + tIm * fftRe[k + j + mh];
+          fftRe[k + j] = uRe + vRe; fftIm[k + j] = uIm + vIm;
+          fftRe[k + j + mh] = uRe - vRe; fftIm[k + j + mh] = uIm - vIm;
+          const nextRe = tRe * wRe - tIm * wIm;
+          tIm = tRe * wIm + tIm * wRe;
+          tRe = nextRe;
+        }
+      }
+    }
+  }
+
+  const mag = new Float32Array(halfFFT);
+  const chunkSize = 1024; // frames per chunk before yielding to UI
+  const totalChunks = Math.ceil(frameCount / chunkSize);
+
+  for (let chunk = 0; chunk < totalChunks; chunk++) {
+    const startFrame = chunk * chunkSize;
+    const endFrame = Math.min(startFrame + chunkSize, frameCount);
+
+    for (let f = startFrame; f < endFrame; f++) {
+      const sampleStart = f * samplesPerFrame;
+      // Fill FFT buffer with windowed samples
+      for (let i = 0; i < fftSize; i++) {
+        const idx = sampleStart + i - (fftSize >> 1);
+        fftRe[i] = (idx >= 0 && idx < mono.length ? mono[idx] : 0) * hann[i];
+        fftIm[i] = 0;
+      }
+
+      fftInPlace();
+
+      // Magnitude spectrum
+      for (let k = 0; k < halfFFT; k++) {
+        mag[k] = Math.sqrt(fftRe[k] * fftRe[k] + fftIm[k] * fftIm[k]) / fftSize;
+      }
+
+      // Band energies (normalized 0-1 range, matching real-time behavior)
+      const bandE = (lo, hi) => {
+        if (hi < lo) return 0;
+        let s = 0;
+        for (let i = lo; i <= hi; i++) s += Math.min(1, mag[i] * 4);
+        return s / (hi - lo + 1);
+      };
+
+      tl.sub[f] = bandE(subBins[0], subBins[1]);
+      tl.low[f] = bandE(lowBins[0], lowBins[1]);
+      tl.mid[f] = bandE(midBins[0], midBins[1]);
+      tl.high[f] = bandE(highBins[0], highBins[1]);
+      tl.energy[f] = Math.min(1, (tl.sub[f] * 2.0 + tl.low[f] * 1.2 + tl.mid[f] * 0.5 + tl.high[f] * 0.3) / 2);
+    }
+
+    // Yield to UI for progress updates
+    const pct = 5 + Math.round((chunk + 1) / totalChunks * 70);
+    showAnalyzeProgress(pct, `Analyzing... ${Math.round((chunk + 1) / totalChunks * 100)}% (frame ${endFrame}/${frameCount})`);
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  // Smooth the bands to match real-time smoothing behavior
+  const alpha = CFG.smoothAlpha;
+  for (const key of ['sub', 'low', 'mid', 'high']) {
+    let prev = 0;
+    for (let f = 0; f < frameCount; f++) {
+      prev += (tl[key][f] - prev) * alpha;
+      tl[key][f] = prev;
+    }
+  }
+  // Recompute energy after smoothing
+  for (let f = 0; f < frameCount; f++) {
+    tl.energy[f] = Math.min(1, (tl.sub[f] * 2.0 + tl.low[f] * 1.2 + tl.mid[f] * 0.5 + tl.high[f] * 0.3) / 2);
+  }
+
+  showAnalyzeProgress(80, 'Detecting sections...');
+  await new Promise(r => setTimeout(r, 0));
+
+  // 2B: Section detection with full look-ahead
+  const sections = detectSections(tl);
+
+  showAnalyzeProgress(95, 'Detecting beat grid...');
+  await new Promise(r => setTimeout(r, 0));
+
+  // Beat grid via autocorrelation
+  sections.bpm = detectBPM(tl);
+
+  showAnalyzeProgress(100, 'Done!');
+  await new Promise(r => setTimeout(r, 300));
+  hideAnalyzeProgress();
+
+  return { timeline: tl, sections };
+}
+
+// 2B: Section detection — knows the future
+function detectSections(tl) {
+  const { energy, frameCount, fps } = tl;
+  const frameDur = 1 / fps;
+
+  // Per-frame section annotation
+  const section = new Uint8Array(frameCount);     // 0=sustain, 1=breakdown, 2=buildup, 3=drop
+  const timeToNextDrop = new Float32Array(frameCount);
+  const timeSinceLastDrop = new Float32Array(frameCount);
+  const timeToNextBreakdown = new Float32Array(frameCount);
+  const sectionProgress = new Float32Array(frameCount); // 0-1 progress through current section
+
+  // Pass 1: Find drops — energy jumps from <0.3 to >0.7 within 0.5s (30 frames)
+  const dropWindow = Math.round(0.5 * fps);
+  const dropFrames = [];
+  for (let f = dropWindow; f < frameCount; f++) {
+    // Look back: was energy low recently?
+    let minBefore = 1;
+    for (let b = 1; b <= dropWindow; b++) {
+      if (energy[f - b] < minBefore) minBefore = energy[f - b];
+    }
+    // Current energy is high, recent past was low
+    if (minBefore < 0.3 && energy[f] > 0.55) {
+      // Check it's not too close to a previous drop
+      if (dropFrames.length === 0 || f - dropFrames[dropFrames.length - 1] > fps * 2) {
+        dropFrames.push(f);
+      }
+    }
+  }
+
+  // Pass 2: Find breakdowns — sustained energy <0.25 for >2s
+  const breakdownMinFrames = Math.round(2 * fps);
+  const breakdownRanges = []; // [{start, end}]
+  let bdStart = -1;
+  for (let f = 0; f < frameCount; f++) {
+    if (energy[f] < 0.25) {
+      if (bdStart < 0) bdStart = f;
+    } else {
+      if (bdStart >= 0 && f - bdStart >= breakdownMinFrames) {
+        breakdownRanges.push({ start: bdStart, end: f - 1 });
+      }
+      bdStart = -1;
+    }
+  }
+  if (bdStart >= 0 && frameCount - bdStart >= breakdownMinFrames) {
+    breakdownRanges.push({ start: bdStart, end: frameCount - 1 });
+  }
+
+  // Pass 3: Find buildups — energy trend rising for >2s toward a detected drop
+  const buildupMinFrames = Math.round(2 * fps);
+  const buildupRanges = []; // [{start, end}]
+  for (const dropF of dropFrames) {
+    // Walk backwards from drop to find where the buildup started
+    let buildStart = dropF;
+    const trendWindow = Math.round(0.5 * fps);
+    for (let f = dropF - 1; f >= Math.max(0, dropF - fps * 8); f--) {
+      // Is energy generally rising from f toward dropF?
+      const eHere = energy[f];
+      const eFuture = energy[Math.min(f + trendWindow, dropF)];
+      if (eFuture > eHere + 0.01) {
+        buildStart = f;
+      } else {
+        break;
+      }
+    }
+    if (dropF - buildStart >= buildupMinFrames) {
+      buildupRanges.push({ start: buildStart, end: dropF - 1 });
+    }
+  }
+
+  // Pass 4: Assign sections (priority: drop > buildup > breakdown > sustain)
+  // Mark drops: the drop frame + 1.5s after
+  const dropDuration = Math.round(1.5 * fps);
+  for (const df of dropFrames) {
+    for (let f = df; f < Math.min(df + dropDuration, frameCount); f++) {
+      section[f] = 3; // drop
+    }
+  }
+  // Mark buildups (don't overwrite drops)
+  for (const r of buildupRanges) {
+    for (let f = r.start; f <= r.end; f++) {
+      if (section[f] === 0) section[f] = 2; // buildup
+    }
+  }
+  // Mark breakdowns (don't overwrite drops or buildups)
+  for (const r of breakdownRanges) {
+    for (let f = r.start; f <= r.end; f++) {
+      if (section[f] === 0) section[f] = 1; // breakdown
+    }
+  }
+
+  // Pass 5: Compute timing fields
+  // timeToNextDrop: scan forward from each frame
+  let nextDrop = Infinity;
+  for (let f = frameCount - 1; f >= 0; f--) {
+    if (section[f] === 3 && (f === 0 || section[f - 1] !== 3)) nextDrop = f;
+    timeToNextDrop[f] = nextDrop < Infinity ? (nextDrop - f) * frameDur : 999;
+  }
+
+  // timeSinceLastDrop: scan forward
+  let lastDrop = -Infinity;
+  for (let f = 0; f < frameCount; f++) {
+    if (section[f] === 3 && (f === 0 || section[f - 1] !== 3)) lastDrop = f;
+    timeSinceLastDrop[f] = lastDrop > -Infinity ? (f - lastDrop) * frameDur : 999;
+  }
+
+  // timeToNextBreakdown: scan backward
+  let nextBd = Infinity;
+  for (let f = frameCount - 1; f >= 0; f--) {
+    if (section[f] === 1 && (f === 0 || section[f - 1] !== 1)) nextBd = f;
+    timeToNextBreakdown[f] = nextBd < Infinity ? (nextBd - f) * frameDur : 999;
+  }
+
+  // sectionProgress: 0-1 through current contiguous section run
+  let runStart = 0;
+  let runSection = section[0];
+  for (let f = 1; f <= frameCount; f++) {
+    if (f === frameCount || section[f] !== runSection) {
+      const runLen = f - runStart;
+      for (let r = runStart; r < f; r++) {
+        sectionProgress[r] = (r - runStart) / Math.max(1, runLen - 1);
+      }
+      if (f < frameCount) {
+        runStart = f;
+        runSection = section[f];
+      }
+    }
+  }
+
+  return { section, timeToNextDrop, timeSinceLastDrop, timeToNextBreakdown, sectionProgress, dropFrames, breakdownRanges, buildupRanges, bpm: 0 };
+}
+
+// Beat grid via autocorrelation of energy peaks
+function detectBPM(tl) {
+  const { energy, frameCount, fps } = tl;
+
+  // Onset detection: find energy spikes
+  const onsets = new Float32Array(frameCount);
+  for (let f = 1; f < frameCount; f++) {
+    const delta = energy[f] - energy[f - 1];
+    onsets[f] = Math.max(0, delta);
+  }
+
+  // Autocorrelation over BPM range 80-200
+  const minLag = Math.round(fps * 60 / 200); // 200 BPM
+  const maxLag = Math.round(fps * 60 / 80);  // 80 BPM
+  let bestLag = minLag, bestCorr = 0;
+
+  // Use first 30s or full track, whichever is shorter
+  const analyzeFrames = Math.min(frameCount, fps * 30);
+
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let corr = 0;
+    let count = 0;
+    for (let f = 0; f < analyzeFrames - lag; f++) {
+      corr += onsets[f] * onsets[f + lag];
+      count++;
+    }
+    corr /= Math.max(1, count);
+    if (corr > bestCorr) {
+      bestCorr = corr;
+      bestLag = lag;
+    }
+  }
+
+  return Math.round(fps * 60 / bestLag);
+}
+
+// Get offline frame index from current audio playback time
+function getOfflineFrame() {
+  if (!offlineTimeline || !audioEl) return -1;
+  const time = audioEl.currentTime;
+  return Math.min(Math.floor(time * offlineTimeline.fps), offlineTimeline.frameCount - 1);
+}
+
+// Section name lookup
+const SECTION_NAMES = ['sustain', 'breakdown', 'buildup', 'drop'];
 
 // ─── Particle Pool ──────────────────────────────────────────────────
 const pool = new Array(CFG.maxParticles);
@@ -1161,6 +1628,14 @@ let bhWorldZ = 40.0;
 let bhPassFlash = 0;
 let impactIntensity = 0; // kick impact for post-processing distortion
 
+// Look-ahead state (Phase 2C) — fed from offline analysis each frame
+let lookAhead = {
+  nextDropIn: 999,      // seconds until next energy spike
+  sectionProgress: 0,   // 0-1 how far through current section
+  beatPhase: 0,         // 0-1 position within beat grid
+  anticipation: 0,      // 0-1 smoothed anticipation intensity (ramps up before drops)
+};
+
 // Evolution phase system
 let evoPhaseIdx = 0;
 let evoPhaseTimer = 0;
@@ -1219,7 +1694,9 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
   const lensRadius = W * 0.15 * bhProximity * (1.0 + kick * 0.5);
 
   // Forward-streaming starfield with gravitational lensing
-  const starSpeed = 0.3 + kick * 2.0 + energy * 1.0 + cameraSpeed * 0.05;
+  // Beat phase adds subtle rhythmic pulse; anticipation accelerates stars before drops
+  const beatPulse = offlineMode ? 0.15 * Math.sin(lookAhead.beatPhase * Math.PI * 2) : 0;
+  const starSpeed = 0.3 + kick * 2.0 + energy * 1.0 + cameraSpeed * 0.05 + beatPulse + lookAhead.anticipation * 0.5;
   for (const s of stars) {
     s.dist += s.speed * starSpeed * dt;
     if (s.dist > 1.5) {
@@ -1314,7 +1791,9 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
     }
 
     // ── Outer Spectrum Ring — breathes with KICK, not general energy ──
-    const sectionBreath = section === 'drop' ? 1.3 : section === 'breakdown' ? 0.7 : 1.0;
+    // Anticipation "inhale": ring contracts before drops, then explodes on drop
+    const inhale = lookAhead.anticipation; // 0-1, peaks just before drop
+    const sectionBreath = section === 'drop' ? 1.3 : section === 'breakdown' ? 0.7 : (1.0 - inhale * 0.25);
     const ringR = Math.min(W, H) * (0.32 + kick * 0.12) * sectionBreath;
     const ringCX = cx + (vpX - cx) * 0.05;
     const ringCY = cy + (vpY - cy) * 0.05;
@@ -1573,7 +2052,7 @@ if (CFG.demoMode) {
 }
 
 // ─── Audio Loading ──────────────────────────────────────────────────
-function loadAudio(file) {
+function startPlayback(file) {
   initAudio();
   if (!audioCtx) return;
   if (sourceNode) { sourceNode.disconnect(); sourceNode = null; }
@@ -1591,18 +2070,67 @@ function loadAudio(file) {
   }).catch(e => showError('Play failed: ' + e.message));
 }
 
+function loadAudioRealtime(file) {
+  offlineMode = false;
+  offlineTimeline = null;
+  offlineSections = null;
+  startPlayback(file);
+}
+
+async function loadAudioAnalyzed(file) {
+  dropZone.classList.add('hidden');
+  const result = await analyzeAudioOffline(file);
+  if (!result) {
+    dropZone.classList.remove('hidden');
+    return;
+  }
+  offlineTimeline = result.timeline;
+  offlineSections = result.sections;
+  offlineMode = true;
+  startPlayback(file);
+}
+
+// Pending file for mode selection
+let pendingFile = null;
+
+function showModeChoice(file) {
+  pendingFile = file;
+  dropZone.querySelector('div').innerHTML =
+    `<div style="margin-bottom:20px;font-size:20px;letter-spacing:2px">MODE SELECT</div>` +
+    `<button id="btn-realtime" class="mode-btn"><span class="label">&#9654; Real-time</span><span class="desc">Instant playback, reactive only</span></button>` +
+    `<button id="btn-analyzed" class="mode-btn recommended"><span class="label">&#9889; Analyzed</span><span class="desc">Pre-scans track &middot; anticipation &middot; look-ahead</span></button>` +
+    `<small style="display:block;margin-top:16px;font-size:11px;color:rgba(0,255,0,.35)">Analyzed mode knows what's coming — camera, fog, and ring react before drops hit</small>`;
+  document.getElementById('btn-realtime').onclick = () => {
+    restoreDropZone();
+    loadAudioRealtime(pendingFile);
+  };
+  document.getElementById('btn-analyzed').onclick = () => {
+    restoreDropZone();
+    loadAudioAnalyzed(pendingFile);
+  };
+}
+
+function restoreDropZone() {
+  dropZone.querySelector('div').innerHTML =
+    `DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small>`;
+  // Re-attach click handler for file picker
+  dropZone.onclick = dropZoneClick;
+}
+
+function dropZoneClick() {
+  const i = document.createElement('input');
+  i.type = 'file'; i.accept = 'audio/*';
+  i.onchange = () => { if (i.files[0]) showModeChoice(i.files[0]); };
+  i.click();
+}
+
 document.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
 document.addEventListener('drop', e => {
   e.preventDefault(); e.stopPropagation();
   const f = e.dataTransfer.files[0];
-  if (f) loadAudio(f);
+  if (f) showModeChoice(f);
 });
-dropZone.addEventListener('click', () => {
-  const i = document.createElement('input');
-  i.type = 'file'; i.accept = 'audio/*';
-  i.onchange = () => { if (i.files[0]) loadAudio(i.files[0]); };
-  i.click();
-});
+dropZone.onclick = dropZoneClick;
 
 // ─── Keyboard ───────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
@@ -1650,6 +2178,32 @@ function frame(nowMs) {
 
   processAudio();
   updateSongSection(dt);
+
+  // ── Look-ahead uniforms (Phase 2C) — read offline data into smoothed state ──
+  if (offlineMode && offlineSections && offlineTimeline) {
+    const f = getOfflineFrame();
+    if (f >= 0) {
+      lookAhead.nextDropIn = offlineSections.timeToNextDrop[f];
+      lookAhead.sectionProgress = offlineSections.sectionProgress[f];
+      // Beat phase: position within beat grid (0-1 per beat)
+      if (offlineSections.bpm > 0) {
+        const beatDur = 60.0 / offlineSections.bpm;
+        const time = f / offlineTimeline.fps;
+        lookAhead.beatPhase = (time % beatDur) / beatDur;
+      }
+      // Anticipation ramp: builds from 0→1 over the 3s before a drop
+      const ttd = lookAhead.nextDropIn;
+      const targetAnticipation = ttd < 3.0 ? Math.pow(1.0 - ttd / 3.0, 1.5) : 0;
+      lookAhead.anticipation += (targetAnticipation - lookAhead.anticipation) * 4.0 * dt;
+    }
+  } else {
+    // Real-time: no look-ahead, decay anticipation
+    lookAhead.nextDropIn = 999;
+    lookAhead.sectionProgress = 0;
+    lookAhead.beatPhase = 0;
+    lookAhead.anticipation *= 0.95;
+  }
+
   updateSpawns();
 
   // Smooth mouse tracking
@@ -1744,6 +2298,15 @@ function frame(nowMs) {
     sectionFogMul = 0.7;   // clear for impact
   }
 
+  // Look-ahead anticipation effects (Phase 2C) — only when offline data available
+  const ant = lookAhead.anticipation;
+  if (ant > 0.01) {
+    // Camera accelerates before drops — subtle ramp
+    sectionSpeedMul += ant * 0.8;
+    // Fog clears in anticipation — opens up the view
+    sectionFogMul *= 1.0 - ant * 0.4;
+  }
+
   // ── Forward camera ──
   const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed) * evoSmooth.speedMul * sectionSpeedMul;
   cameraZ += forwardSpeed * dt;
@@ -1768,9 +2331,10 @@ function frame(nowMs) {
   bhPassFlash *= 0.92; // decay the flash
 
   // BH grows as you approach — no hard cap, should feel massive up close
+  // Anticipation: BH looms larger before drops (perceived drift closer)
   const bhApproachFactor = Math.max(0.15, 15.0 / Math.max(bhDist, 0.5));
   const bhZ = bhWorldZ;
-  const bhSize = (2.0 + energy * 1.2 + kick * 0.8) * Math.min(bhApproachFactor, 4.0);
+  const bhSize = (2.0 + energy * 1.2 + kick * 0.8 + ant * 1.5) * Math.min(bhApproachFactor, 4.0);
 
   // ── Shape morphing ──
   shapeTimer += dt;
@@ -1856,13 +2420,23 @@ function frame(nowMs) {
     document.getElementById('hud-band').textContent = `K:${kick.toFixed(2)} S:${snare.toFixed(2)} H:${hat.toFixed(2)}`;
     const shapeNames = ['protein','crystal','jellyfish','blackhole'];
     const phaseNames = CFG.evoPhases.map((_,i) => `P${i}`);
-    document.getElementById('hud-extra').textContent =
-      `P:${aliveP}/${CFG.maxParticles} Z:${cameraZ.toFixed(0)} Spd:${cameraSpeed.toFixed(1)} Phase:${phaseNames[evoPhaseIdx]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''} [${section.toUpperCase()}]`;
+    let extraInfo = `P:${aliveP}/${CFG.maxParticles} Z:${cameraZ.toFixed(0)} Spd:${cameraSpeed.toFixed(1)} Phase:${phaseNames[evoPhaseIdx]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''} [${section.toUpperCase()}]`;
+    if (offlineMode && offlineSections) {
+      const f = getOfflineFrame();
+      if (f >= 0) {
+        const ttd = offlineSections.timeToNextDrop[f];
+        const tsd = offlineSections.timeSinceLastDrop[f];
+        const sp = offlineSections.sectionProgress[f];
+        extraInfo += ` | DROP:${ttd < 100 ? ttd.toFixed(1)+'s' : '--'} BPM:${offlineSections.bpm} SP:${sp.toFixed(2)} ANT:${lookAhead.anticipation.toFixed(2)} BP:${lookAhead.beatPhase.toFixed(2)}`;
+      }
+    }
+    extraInfo += offlineMode ? ' [ANALYZED]' : ' [REALTIME]';
+    document.getElementById('hud-extra').textContent = extraInfo;
   }
 }
 
 requestAnimationFrame(frame);
-console.log('Breakcore Visualizer v5 — Immersive Void — WebGL2 + GLSL + Canvas 2D overlay');
+console.log('Breakcore Visualizer v6.0 — Look-Ahead + Anticipation — WebGL2 + GLSL + Canvas 2D overlay');
 </script>
 </body>
 </html>
