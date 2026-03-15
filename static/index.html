@@ -638,7 +638,7 @@ precision highp float;
 in vec2 vUV;
 out vec4 fragColor;
 uniform sampler2D uScene, uPrev;
-uniform float uTime, uEnergy, uKick, uChaos, uPhase, uCamSpeed;
+uniform float uTime, uEnergy, uKick, uChaos, uPhase, uCamSpeed, uImpact;
 uniform vec2 uRes;
 
 float hash(vec2 p) {
@@ -686,11 +686,33 @@ void main() {
     return;
   }
 
-  float ca = 0.002 + uChaos * 0.005 + uKick * 0.006;
+  // Gravity wave distortion on impact
+  if (uImpact > 0.01) {
+    vec2 center = uv - 0.5;
+    float r = length(center);
+    float wave = sin(r * 30.0 - uTime * 15.0) * uImpact * 0.008;
+    uv += normalize(center + 0.001) * wave;
+  }
+
+  // Radial zoom blur on impact
+  float ca = 0.002 + uChaos * 0.005 + uKick * 0.006 + uImpact * 0.008;
   vec3 col;
-  col.r = texture(uScene, uv + vec2(ca, 0.0)).r;
-  col.g = texture(uScene, uv).g;
-  col.b = texture(uScene, uv - vec2(ca, 0.0)).b;
+  if (uImpact > 0.1) {
+    col = vec3(0.0);
+    vec2 dir = uv - 0.5;
+    for (int i = 0; i < 6; i++) {
+      float t = float(i) / 6.0 * uImpact * 0.03;
+      col += texture(uScene, uv - dir * t).rgb;
+    }
+    col /= 6.0;
+    // Still apply CA on top
+    col.r = mix(col.r, texture(uScene, uv + vec2(ca, 0.0)).r, 0.5);
+    col.b = mix(col.b, texture(uScene, uv - vec2(ca, 0.0)).b, 0.5);
+  } else {
+    col.r = texture(uScene, uv + vec2(ca, 0.0)).r;
+    col.g = texture(uScene, uv).g;
+    col.b = texture(uScene, uv - vec2(ca, 0.0)).b;
+  }
 
   // Bloom
   vec3 bloom = vec3(0.0); float total = 0.0;
@@ -703,8 +725,8 @@ void main() {
   bloom = max(bloom/total - ${CFG.post.bloomThreshold.toFixed(1)}, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
   col += bloom * (0.2 + uKick * ${CFG.post.bloomKickBoost.toFixed(2)});
 
-  // Feedback trail — zoom scales with camera velocity for motion blur
-  float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.006;
+  // Feedback trail — zoom punch on impact
+  float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.006 - uImpact * 0.02;
   vec2 prevUV = crtDistort((vUV - 0.5) * feedbackZoom + 0.5);
   vec3 prev = texture(uPrev, prevUV).rgb * ${CFG.post.feedbackDecay.toFixed(2)};
   col = mix(col, prev, ${CFG.post.feedbackBlend.toFixed(2)});
@@ -722,6 +744,12 @@ void main() {
 
   // Kick flash
   col += vec3(1.0, 0.3, 0.6) * smoothstep(0.8, 1.0, uKick) * 0.12;
+
+  // Flash-frame color inversion on hardest hits
+  if (uImpact > 0.7) {
+    float invStr = (uImpact - 0.7) / 0.3 * 0.6;
+    col = mix(col, vec3(1.0) - col, invStr);
+  }
 
   // Color grading
   col = colorGrade(col, uPhase);
@@ -798,7 +826,7 @@ const sceneU = getUniforms(sceneProg, [
   'uCamXY','uCorridorR','uBHZ','uBHSize'
 ]);
 const postU = getUniforms(postProg, [
-  'uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes','uPhase','uCamSpeed'
+  'uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes','uPhase','uCamSpeed','uImpact'
 ]);
 const emptyVAO = gl.createVertexArray();
 
@@ -1041,6 +1069,7 @@ function updateSpawns() {
     spawnRing(310);
     spawnTear();
     if (Math.random() < 0.5) spawnTear();
+    if (Math.random() < 0.3) spawnTear(true); // center tear
   }
   if (sd > th.snare) {
     spawnBurst('snare', 0);
@@ -1051,8 +1080,11 @@ function updateSpawns() {
   if (e > CFG.peakEnergyMin && kd > th.peak) {
     spawnBurst('peak', Math.random() * 360);
     spawnRing(Math.random() * 360);
-    spawnTear(); spawnTear();
+    spawnTear(); spawnTear(true);
     if (Math.random() < 0.5) spawnTear();
+    // Trigger mandala on sustained peaks
+    mandalaAlpha = 0.6;
+    mandalaHue = hueVal;
   }
 
   prevKick = bands.sub; prevSnare = bands.low; prevHat = bands.high;
@@ -1086,13 +1118,24 @@ for (let i = 0; i < CFG.numStars; i++) {
 // ─── Reality Tears ──────────────────────────────────────────────────
 const tears = [];
 
-function spawnTear() {
-  const side = Math.random() < 0.5 ? -1 : 1;
+function spawnTear(center) {
+  const W = window.innerWidth, H = window.innerHeight;
+  let x, y, w, h;
+  if (center) {
+    // Center tears — wider, shorter, horizontal
+    x = W * (0.3 + Math.random() * 0.4);
+    y = H * (0.35 + Math.random() * 0.3);
+    w = 20 + Math.random() * 60;
+    h = 3 + Math.random() * 8;
+  } else {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    x = W * (0.5 + side * (0.25 + Math.random() * 0.25));
+    y = H * (0.1 + Math.random() * 0.8);
+    w = 3 + Math.random() * 12;
+    h = 40 + Math.random() * 200;
+  }
   tears.push({
-    x: window.innerWidth * (0.5 + side * (0.25 + Math.random() * 0.25)),
-    y: window.innerHeight * (0.1 + Math.random() * 0.8),
-    w: 3 + Math.random() * 12,
-    h: 40 + Math.random() * 200,
+    x, y, w, h,
     life: 0.4 + Math.random() * 0.8,
     maxLife: 0.4 + Math.random() * 0.8,
     hue: Math.random() * 360,
@@ -1102,13 +1145,18 @@ function spawnTear() {
   if (tears.length > CFG.maxTears) tears.shift();
 }
 
+// Mandala state
+let mandalaAlpha = 0;
+let mandalaHue = 0;
+
 // ─── Evolution + Camera State ───────────────────────────────────────
 let cameraZ = 0;
 let cameraSpeed = 0;
 
 // Black hole: fixed world position, you approach and pass through it
-let bhWorldZ = 40.0; // starts 40 units ahead
-let bhPassFlash = 0; // flash intensity when passing through
+let bhWorldZ = 40.0;
+let bhPassFlash = 0;
+let impactIntensity = 0; // kick impact for post-processing distortion
 
 // Evolution phase system
 let evoPhaseIdx = 0;
@@ -1406,6 +1454,30 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
     ctx.globalAlpha = 1;
   }
 
+  // Geometric mandala on sustained peaks
+  if (mandalaAlpha > 0.02) {
+    mandalaAlpha *= 0.95;
+    const mR = Math.min(W, H) * 0.25;
+    const petals = 6;
+    ctx.lineWidth = 1.5;
+    for (let layer = 0; layer < 3; layer++) {
+      const lr = mR * (0.3 + layer * 0.3);
+      ctx.globalAlpha = mandalaAlpha * (0.6 - layer * 0.15);
+      ctx.strokeStyle = `hsl(${(mandalaHue + layer * 60) % 360},80%,60%)`;
+      for (let i = 0; i < petals; i++) {
+        const a = (i / petals) * Math.PI * 2 + overlayTime * 0.2 * (layer % 2 === 0 ? 1 : -1);
+        ctx.beginPath();
+        ctx.arc(
+          cx + Math.cos(a) * lr * 0.5,
+          cy + Math.sin(a) * lr * 0.5,
+          lr * 0.4, 0, Math.PI * 2
+        );
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // Reality Tears
   for (let i = tears.length - 1; i >= 0; i--) {
     const t = tears[i];
@@ -1628,9 +1700,15 @@ function frame(nowMs) {
   const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
   const time = t - t0;
 
+  // ── Impact system — hard kicks trigger distortion ──
+  const kickDelta = bands.sub - prevKick;
+  if (kickDelta > 0.02 && kick > 0.6) {
+    impactIntensity = Math.min(1.0, kick * 1.2);
+  }
+  impactIntensity *= 0.85; // fast decay
+
   // ── Evolution phase system — song-section aware ──
   evoPhaseTimer += dt;
-  const kickDelta = bands.sub - prevKick;
   const section = energyHistory.section;
 
   // Song section overrides: drops force phase change, breakdowns hold
@@ -1762,6 +1840,7 @@ function frame(nowMs) {
   gl.uniform1f(postU.uChaos, chaos);
   gl.uniform1f(postU.uPhase, evoSmooth.colorGrade);
   gl.uniform1f(postU.uCamSpeed, cameraSpeed);
+  gl.uniform1f(postU.uImpact, impactIntensity);
   gl.uniform2f(postU.uRes, screenW, screenH);
   drawFullscreenTriangle();
 
