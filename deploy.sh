@@ -43,7 +43,7 @@ ssh "$SERVER" "cd $DEPLOY_DIR && docker compose down || true && docker compose u
 echo ""
 echo "=== Deployment Complete ==="
 echo ""
-echo "Access the visualizer at: http://192.168.1.9:8080"
+echo "Access the visualizer at: http://192.168.1.9:8086"
 echo ""
 echo "To view logs:"
 echo "  ssh $SERVER 'cd $DEPLOY_DIR && docker-compose logs -f'"

@@ -5,7 +5,8 @@ fn main() {
     eprintln!("Breakcore Visualizer running on http://0.0.0.0:3000");
 
     for request in server.incoming_requests() {
-        match request.url() {
+        let path = request.url().split('?').next().unwrap_or("/");
+        match path {
             "/" => {
                 let html = include_str!("../static/index.html");
                 let header = Header::from_bytes("Content-Type", "text/html; charset=utf-8").unwrap();

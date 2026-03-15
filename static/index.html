@@ -33,7 +33,7 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
   <div id="hud-energy">Energy: 0.00</div>
   <div id="hud-chaos">Chaos: 0.00</div>
   <div id="hud-band">K:0 S:0 H:0</div>
-  <div id="hud-particles">P: 0</div>
+  <div id="hud-extra">P: 0</div>
 </div>
 <div id="drop-zone"><div>DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small></div></div>
 <div id="error"></div>
@@ -50,50 +50,59 @@ const CFG = {
   bandMultipliers: { kick: 3, snare: 2.5, hat: 4 },
 
   // Particles
-  maxParticles: 800,
+  maxParticles: 1200,
   spawn: {
-    kick:  { count: [30, 50], speed: [200, 600], size: [4, 9], life: [1.0, 1.8], gravity: 400 },
-    snare: { count: [20, 35], speed: [250, 650], size: [2, 5], life: [0.5, 0.9], gravity: 200 },
-    hat:   { count: [25, 40], speed: [350, 850], size: [1.5, 3.5], life: [0.3, 0.6], gravity: 0 },
-    peak:  { count: [40, 70], speed: [300, 900], size: [3, 7], life: [0.8, 1.6], gravity: 300 },
+    kick:  { count: [40, 70], speed: [250, 700], size: [5, 11], life: [0.8, 1.5], gravity: 500 },
+    snare: { count: [30, 50], speed: [300, 750], size: [3, 6], life: [0.4, 0.8], gravity: 250 },
+    hat:   { count: [35, 55], speed: [400, 950], size: [2, 4], life: [0.2, 0.5], gravity: 0 },
+    peak:  { count: [60, 100], speed: [350, 1000], size: [4, 9], life: [0.6, 1.3], gravity: 350 },
   },
   onsetThresholds: { kick: 0.015, snare: 0.012, hat: 0.008, peak: 0.03 },
   peakEnergyMin: 0.6,
 
   // Overlay
   numBars: 64,
-  numStars: 300,
-  maxRings: 8,
-  maxTears: 12,
+  numStars: 400,
+  maxRings: 12,
+  maxTears: 30,
   numTendrils: 16,
 
   // Visual evolution
-  phaseDuration: 20,
-  shapeDuration: 45, // seconds per shape before morphing
-  morphDuration: 5,  // seconds to morph between shapes
-  numShapes: 4,      // protein, crystal, jellyfish, blackhole
+  phaseDuration: 6,    // seconds per evolution phase — breakcore doesn't linger
+  shapeDuration: 8,    // seconds per shape before morphing
+  morphDuration: 1.5,  // seconds to morph between shapes — fast cuts
+  numShapes: 4,        // protein, crystal, jellyfish, blackhole
 
-  // Camera modes
-  camera: {
-    modeDuration: 8,    // seconds per camera mode before eligible for switch
-    modes: ['orbit', 'closeup', 'wide', 'side', 'topdown'],
-  },
+  // Forward camera
+  camBaseSpeed: 2.0,
+  camBoostSpeed: 5.0,
+  camKickImpulse: 0.4,
+  corridorRadius: 3.5, // tunnel wall minimum radius from camera path
 
   // Shader tuning
   scene: {
-    steps: 44, maxDist: 25.0, surfThreshold: 0.015,
-    torusMajorR: 1.2, tubeR: 0.45,
-    camOrbitSpeed: 0.4, camBaseDist: 4.0, camEnergyDist: 1.5,
+    steps: 44, maxDist: 40.0, surfThreshold: 0.015,
   },
   post: {
     bloomThreshold: 0.5, bloomIntensity: 1.2, bloomKickBoost: 0.25,
-    feedbackZoom: 0.97, feedbackDecay: 0.85, feedbackBlend: 0.35,
+    feedbackBaseZoom: 0.97, feedbackDecay: 0.85, feedbackBlend: 0.35,
     vignetteStrength: 0.45, toneMapCompression: 0.25, saturationBoost: 1.25,
     maxBrightness: 0.93,
   },
 
+  // Evolution phases — each defines a distinct "place"
+  evoPhases: [
+    { repPeriod: 7.0, fogDensity: 0.06, speedMul: 1.0, tunnelBlend: 0.0, objScale: 0.8, colorGrade: 0 },
+    { repPeriod: 5.0, fogDensity: 0.08, speedMul: 1.3, tunnelBlend: 0.0, objScale: 0.7, colorGrade: 1 },
+    { repPeriod: 9.0, fogDensity: 0.05, speedMul: 0.7, tunnelBlend: 0.0, objScale: 1.0, colorGrade: 2 },
+    { repPeriod: 6.0, fogDensity: 0.07, speedMul: 1.2, tunnelBlend: 0.4, objScale: 0.75, colorGrade: 3 },
+    { repPeriod: 4.5, fogDensity: 0.10, speedMul: 1.8, tunnelBlend: 0.6, objScale: 0.6, colorGrade: 0 },
+    { repPeriod: 10.0, fogDensity: 0.04, speedMul: 0.5, tunnelBlend: 0.0, objScale: 1.0, colorGrade: 2 },
+  ],
+
   // HUD
   debugMode: new URLSearchParams(window.location.search).has('debug'),
+  demoMode: new URLSearchParams(window.location.search).has('demo'),
 };
 
 // ─── Error Handling ─────────────────────────────────────────────────
@@ -136,9 +145,10 @@ in vec2 vUV;
 out vec4 fragColor;
 
 uniform float uTime, uEnergy, uKick, uSnare, uHat, uChaos, uHue, uMorph;
-uniform float uCamDist, uCamHeight, uCamOrbitSpd, uCamFov;
+uniform float uCamZ, uTunnelBlend, uFogDensity, uRepPeriod, uObjScale, uCorridorR;
+uniform float uBHZ, uBHSize;
 uniform int uShapeA, uShapeB;
-uniform vec2 uRes, uMouse;
+uniform vec2 uRes, uMouse, uCamXY;
 
 #define STEPS ${CFG.scene.steps}
 #define MAX_DIST ${CFG.scene.maxDist.toFixed(1)}
@@ -149,202 +159,345 @@ vec3 hsl(float h, float s, float l) {
   return l+s*(c-0.5)*(1.0-abs(2.0*l-1.0));
 }
 
-float torusSDF(vec3 p) {
-  float twist = uTime * 2.0 + uEnergy * 3.0 + uChaos * 2.0;
-  float convulse = sin(twist * 6.0) * uChaos * 0.3;
-  vec3 pp = p;
-  pp.x += convulse + sin(pp.y * 3.0 + twist) * uEnergy * 0.25;
-  pp.y += sin(pp.z * 2.5 + twist) * uEnergy * 0.2;
-  pp.z += cos(pp.x * 2.0 + twist * 1.2) * uEnergy * 0.2;
-  float r = length(pp.xy) - ${CFG.scene.torusMajorR.toFixed(1)};
-  float y2 = pp.z - 0.5 * sin(atan(pp.y, pp.x) * 5.0 + twist);
-  float d = sqrt(r * r + y2 * y2) - ${CFG.scene.tubeR.toFixed(2)};
-  d += 0.06 * sin(pp.x*12.0+twist) * sin(pp.y*12.0) * sin(pp.z*12.0) * uEnergy;
-  d += 0.03 * sin(pp.x*25.0) * sin(pp.y*25.0) * sin(pp.z*25.0) * uChaos;
+// ── Hashing ──
+vec3 hash31(vec3 p) {
+  p = mod(p, 256.0);
+  p = fract(p * vec3(443.897, 397.297, 491.187));
+  p += dot(p, p.yzx + 19.19);
+  return fract(vec3(p.x*p.y, p.y*p.z, p.z*p.x));
+}
+
+mat2 rot2(float a) { float c=cos(a),s=sin(a); return mat2(c,s,-s,c); }
+
+// ── Shape SDFs ──
+float torusSDF(vec3 p, float tw) {
+  p.x += sin(p.y*3.0+tw)*0.2*uEnergy;
+  p.y += sin(p.z*2.5+tw)*0.15*uEnergy;
+  float r = length(p.xy) - 1.2;
+  float y2 = p.z - 0.5*sin(atan(p.y,p.x)*5.0+tw);
+  float d = sqrt(r*r+y2*y2) - 0.45;
+  d += 0.05*sin(p.x*12.0+tw)*sin(p.y*12.0)*sin(p.z*12.0)*uEnergy;
+  d += 0.03*sin(p.x*25.0)*sin(p.y*25.0)*sin(p.z*25.0)*uChaos;
   return d;
 }
 
-// Crystal / Octahedron SDF
-float crystalSDF(vec3 p) {
-  float twist = uTime * 1.5 + uEnergy * 2.0;
-  vec3 pp = p;
-  // Slow rotation
-  float c = cos(twist * 0.3), s = sin(twist * 0.3);
-  pp.xz = mat2(c, s, -s, c) * pp.xz;
-  pp.xy = mat2(cos(twist*0.2), sin(twist*0.2), -sin(twist*0.2), cos(twist*0.2)) * pp.xy;
-  // Octahedron: |x|+|y|+|z| = r
-  float d = (abs(pp.x) + abs(pp.y) + abs(pp.z) - 1.3) * 0.577;
-  // Audio-reactive facet displacement
-  d += 0.08 * sin(pp.x*8.0+twist*2.0) * sin(pp.y*8.0) * uEnergy;
-  d += 0.04 * sin(pp.z*15.0+twist) * uChaos;
+float crystalSDF(vec3 p, float tw) {
+  p.xz *= rot2(tw*0.3);
+  p.xy *= rot2(tw*0.2);
+  float d = (abs(p.x)+abs(p.y*1.5)+abs(p.z)-1.3)*0.5;
+  vec3 q = p; q.xz *= rot2(0.785);
+  float s2 = (abs(q.x*1.3)+abs(q.y)+abs(q.z*1.3)-1.0)*0.5;
+  vec3 r = p; r.yz *= rot2(0.785);
+  float s3 = (abs(r.x)+abs(r.y*1.4)+abs(r.z)-0.9)*0.5;
+  d = min(d, min(s2, s3));
+  d += 0.04*sin(p.x*15.0+tw*2.0)*sin(p.y*15.0+tw)*sin(p.z*15.0)*uEnergy;
+  d += 0.03*sin(p.x*25.0)*sin(p.z*25.0)*uChaos;
   return d;
 }
 
-// Jellyfish SDF — dome + tendrils
-float jellyfishSDF(vec3 p) {
-  float twist = uTime * 1.8 + uEnergy * 2.5;
-  vec3 pp = p;
-  pp.y += 0.3;
-  // Dome (sphere with bottom cut)
-  float dome = length(pp) - 1.2;
-  dome = max(dome, pp.y - 0.3); // cut bottom
-  // Pulse the dome
-  dome += 0.1 * sin(atan(pp.z, pp.x) * 6.0 + twist) * uKick;
-  // Tendrils below
-  float ty = pp.y + 0.5;
-  if (ty < 0.0) {
-    float tendrilAngle = atan(pp.z, pp.x);
-    float tendrilR = length(pp.xz);
-    float wave = sin(tendrilAngle * 5.0 + twist * 2.0) * 0.15 + sin(ty * 8.0 - twist * 3.0) * 0.1;
-    float tendril = tendrilR - (0.3 + wave) * exp(ty * 0.8);
-    dome = min(dome, tendril);
+float jellyfishSDF(vec3 p, float tw) {
+  p.y += 0.3+sin(tw*0.4)*0.3;
+  p.xz *= rot2(tw*0.15);
+  float breathe = 1.0+sin(tw)*0.1*(1.0+uKick);
+  float dome = length(p*vec3(1.0,1.3,1.0))/breathe - 1.1;
+  dome = max(dome, p.y-0.2);
+  dome += 0.06*sin(atan(p.z,p.x)*8.0+tw)*sin(p.y*5.0)*uKick;
+  float ty = p.y+0.3;
+  if(ty<0.0) {
+    for(int i=0; i<5; i++) {
+      float a = float(i)*1.2566+tw*0.25;
+      vec2 tc = vec2(cos(a),sin(a))*0.4;
+      float td = length(p.xz-tc);
+      float w = sin(ty*6.0-tw*1.5+float(i))*0.12;
+      dome = min(dome, td-(0.08+w)*exp(ty*0.6));
+    }
   }
-  dome += 0.05 * sin(pp.x*10.0+twist) * sin(pp.z*10.0) * uEnergy;
+  dome += 0.04*sin(p.x*12.0+tw)*sin(p.z*12.0)*uEnergy;
   return dome;
 }
 
-// Black hole with accretion disk SDF
-float blackholeSDF(vec3 p) {
-  float twist = uTime * 2.5 + uEnergy * 3.0;
-  vec3 pp = p;
-  // Event horizon (sphere)
-  float hole = length(pp) - 0.4;
-  // Accretion disk (torus, flat and wide)
-  float diskR = length(pp.xz) - 1.5;
-  float disk = sqrt(diskR * diskR + pp.y * pp.y) - 0.08;
-  // Warp disk with audio
-  disk += 0.06 * sin(atan(pp.z, pp.x) * 8.0 + twist * 3.0) * uEnergy;
-  disk += 0.03 * sin(length(pp.xz) * 12.0 - twist * 4.0) * uKick;
-  // Gravitational lensing warp
-  float r = length(pp);
-  float warp = 0.3 / (r * r + 0.1);
-  pp.y += warp * sin(twist);
+float blackholeSDF(vec3 p, float tw) {
+  float hole = length(p) - 0.4;
+  float diskR = length(p.xz) - 1.5;
+  float disk = sqrt(diskR*diskR+p.y*p.y) - 0.08;
+  disk += 0.06*sin(atan(p.z,p.x)*8.0+tw*3.0)*uEnergy;
+  disk += 0.03*sin(length(p.xz)*12.0-tw*4.0)*uKick;
   return min(hole, disk);
 }
 
-// Select shape by index
-float shapeSDF(vec3 p, int idx) {
-  if (idx == 0) return torusSDF(p);
-  if (idx == 1) return crystalSDF(p);
-  if (idx == 2) return jellyfishSDF(p);
-  return blackholeSDF(p);
+float shapeSDF(vec3 p, int idx, float tw) {
+  if(idx==0) return torusSDF(p, tw);
+  if(idx==1) return crystalSDF(p, tw);
+  if(idx==2) return jellyfishSDF(p, tw);
+  return blackholeSDF(p, tw);
 }
 
-// Morphed main shape
-float mainSDF(vec3 p) {
-  float a = shapeSDF(p, uShapeA);
-  float b = shapeSDF(p, uShapeB);
+float morphedSDF(vec3 p, float tw) {
+  float a = shapeSDF(p, uShapeA, tw);
+  float b = shapeSDF(p, uShapeB, tw);
   return mix(a, b, uMorph);
 }
 
-float satelliteSDF(vec3 p) {
-  float t = uTime;
-  float a1 = t * 1.5;
-  vec3 c1 = vec3(cos(a1)*2.5, sin(a1*0.8)*0.8, sin(a1)*2.5);
-  float s1 = length(p - c1) - (0.12 + uKick * 0.25);
-  float a2 = t * 2.3 + 2.094;
-  vec3 c2 = vec3(cos(a2)*2.2, sin(a2*1.2)*1.0, sin(a2)*2.2);
-  float s2 = length(p - c2) - (0.08 + uSnare * 0.18);
-  float a3 = t * 3.7 + 4.189;
-  vec3 c3 = vec3(cos(a3)*2.8, sin(a3*1.5)*0.6, sin(a3)*2.8);
-  float s3 = length(p - c3) - (0.05 + uHat * 0.12);
-  return min(s1, min(s2, s3));
-}
+// ── Tunnel walls: objects arranged cylindrically around camera path ──
+float tunnelWallSDF(vec3 p) {
+  // Cylindrical coords relative to camera XY path
+  vec2 rel = p.xy - uCamXY;
+  float r = length(rel);
+  float a = atan(rel.y, rel.x);
 
-float gridLines(vec2 uv, float t) {
-  vec2 g = abs(fract(uv * 8.0 + t * 0.3) - 0.5);
-  return smoothstep(0.0, 0.04, min(g.x, g.y));
-}
+  // Domain repeat around the ring and along Z
+  float angCount = 10.0;
+  float angPeriod = 6.283 / angCount;
+  float zPeriod = uRepPeriod;
 
-float sceneSDF(vec3 p) { return min(mainSDF(p), satelliteSDF(p)); }
+  float cellA = floor(a / angPeriod + 0.5);
+  float cellZ = floor(p.z / zPeriod + 0.5);
+  float localA = a - cellA * angPeriod;
+  float localZ = p.z - cellZ * zPeriod;
 
-void main() {
-  vec2 uv = (vUV * 2.0 - 1.0) * vec2(uRes.x / uRes.y, 1.0);
+  vec3 h = hash31(vec3(cellA, cellZ, 0.0));
 
-  vec3 shake = vec3(
-    sin(uTime*45.0)*uKick*0.3, cos(uTime*38.0)*uKick*0.2,
-    sin(uTime*25.0)*uChaos*0.1
+  // Place objects at fixed radius from camera (tunnel wall — far enough to frame)
+  float wallR = uCorridorR + 2.5 + h.x * 3.0;
+  float objAngle = cellA * angPeriod;
+  vec3 objPos = vec3(
+    uCamXY.x + cos(objAngle) * wallR,
+    uCamXY.y + sin(objAngle) * wallR,
+    cellZ * zPeriod
   );
 
-  float angle = uTime * uCamOrbitSpd;
-  float camDist = uCamDist + uEnergy * 1.5;
-  vec2 mOff = (uMouse - 0.5) * 1.5;
-  vec3 ro = vec3(sin(angle)*camDist + mOff.x, cos(angle*0.7)*uCamHeight - mOff.y * 0.8, cos(angle)*camDist) + shake;
-  vec3 fwd = normalize(-ro);
-  vec3 right = normalize(cross(fwd, vec3(0,1,0)));
+  vec3 q = p - objPos;
+  q.xz *= rot2(h.y * 6.283 + uTime * 0.3);
+  q.xy *= rot2(h.z * 3.14);
+  float sc = (0.3 + h.y * 0.5) * uObjScale;
+  q /= sc;
+
+  float tw = uTime * 1.5 + uEnergy * 2.0 + h.z * 6.283;
+  return morphedSDF(q, tw) * sc;
+}
+
+// ── Debris: sparks near tunnel walls only ──
+float debrisSDF(vec3 p) {
+  vec2 rel = p.xy - uCamXY;
+  float r = length(rel);
+  // Only render debris near the tunnel walls, not in center
+  if(r < uCorridorR * 0.7) return 20.0;
+
+  float a = atan(rel.y, rel.x);
+  float angPeriod = 6.283 / 20.0;
+  float zPeriod = 2.5;
+  float cellA = floor(a / angPeriod + 0.5);
+  float cellZ = floor(p.z / zPeriod + 0.5);
+
+  vec3 h = hash31(vec3(cellA, cellZ, 100.0));
+  float debR = uCorridorR + 0.5 + h.x * 3.0;
+  float objAngle = cellA * angPeriod;
+  vec3 objPos = vec3(
+    uCamXY.x + cos(objAngle) * debR,
+    uCamXY.y + sin(objAngle) * debR,
+    cellZ * zPeriod + (h.z - 0.5) * zPeriod * 0.3
+  );
+
+  float sz = (0.02 + h.y * 0.08) * uObjScale;
+  return length(p - objPos) - sz;
+}
+
+// ── Energy ring: mid-zone ring structure that pulses with beat ──
+float energyRingSDF(vec3 p) {
+  vec2 rel = p.xy - uCamXY;
+  float r = length(rel);
+  // Ring at middle distance between camera and tunnel walls
+  float ringR = uCorridorR * 0.6 + uEnergy * 0.5;
+  float zPeriod = 4.0 + uKick * 1.0;
+  float cellZ = floor(p.z / zPeriod + 0.5);
+  float localZ = p.z - cellZ * zPeriod;
+
+  vec3 h = hash31(vec3(cellZ, 0.0, 500.0));
+  // Thin torus ring
+  float torusR = ringR + h.x * 0.5;
+  float tubeR = 0.03 + uKick * 0.06 + uEnergy * 0.03;
+  float d = length(vec2(r - torusR, localZ)) - tubeR;
+  return d;
+}
+
+// ── Grand Attractor: massive black hole always ahead ──
+float attractorSDF(vec3 p) {
+  vec3 bhPos = vec3(uCamXY, uBHZ);
+  vec3 rel = p - bhPos;
+
+  // Event horizon sphere — big dark void
+  float horizon = length(rel) - uBHSize * 0.4;
+
+  // Accretion disk — wide, flat, spinning
+  float diskR = length(rel.xz) - uBHSize;
+  float disk = sqrt(diskR * diskR + rel.y * rel.y) - uBHSize * 0.08;
+  disk += 0.08 * sin(atan(rel.z, rel.x) * 16.0 + uTime * 6.0) * uEnergy;
+  disk += 0.05 * sin(atan(rel.z, rel.x) * 8.0 - uTime * 3.0) * uKick;
+
+  // Inner bright ring
+  float innerRing = abs(length(rel.xz) - uBHSize * 0.6) - uBHSize * 0.03;
+
+  // Outer ring
+  float outerRing = abs(length(rel.xz) - uBHSize * 1.4) - uBHSize * 0.02;
+
+  return min(horizon, min(disk, min(innerRing, outerRing)));
+}
+
+// ── Combined Scene ──
+float sceneSDF(vec3 p) {
+  float tw = tunnelWallSDF(p);
+  float db = debrisSDF(p);
+  float bh = attractorSDF(p);
+  return min(bh, min(tw, db));
+}
+
+void main() {
+  vec2 uv = (vUV*2.0-1.0) * vec2(uRes.x/uRes.y, 1.0);
+
+  // Forward-flying camera
+  vec2 mOff = (uMouse - 0.5)*2.0;
+  float driftX = sin(uTime*0.23)*2.0 + cos(uTime*0.17)*1.5 + mOff.x*2.0;
+  float driftY = sin(uTime*0.19)*1.5 + cos(uTime*0.31)*1.0 - mOff.y*1.5;
+
+  vec3 shake = vec3(
+    sin(uTime*45.0)*uKick*0.4 + sin(uTime*12.0)*uSnare*0.15,
+    cos(uTime*38.0)*uKick*0.3 + cos(uTime*15.0)*uSnare*0.1,
+    sin(uTime*25.0)*uChaos*0.15
+  );
+
+  vec3 ro = vec3(driftX, driftY, uCamZ) + shake;
+  vec3 lookAt = ro + vec3(
+    sin(uTime*0.1)*0.3 + mOff.x*0.5,
+    cos(uTime*0.13)*0.2 - mOff.y*0.3,
+    5.0
+  );
+
+  // Camera roll from chaos
+  float roll = sin(uTime*0.15)*0.15 + uChaos*sin(uTime*2.0)*0.2;
+  vec3 fwd = normalize(lookAt - ro);
+  vec3 worldUp = vec3(sin(roll), cos(roll), 0.0);
+  vec3 right = normalize(cross(fwd, worldUp));
   vec3 up = cross(right, fwd);
-  vec3 rd = normalize(fwd * uCamFov + uv.x * right + uv.y * up);
 
-  // Background grids
-  vec3 bgCol = vec3(0.0);
-  float gridT = (-8.0 - ro.z) / rd.z;
-  if (gridT > 0.0) {
-    vec3 gp = ro + rd * gridT;
-    float g = 1.0 - gridLines(gp.xy, uTime);
-    bgCol += hsl(uHue/360.0, 0.9, 0.4) * (0.25 + uEnergy * 0.5) * g * exp(-gridT * 0.03);
-  }
-  float floorT = (-3.0 - ro.y) / rd.y;
-  if (floorT > 0.0 && floorT < 30.0) {
-    vec3 fp = ro + rd * floorT;
-    float g = 1.0 - gridLines(fp.xz, uTime * 0.5);
-    bgCol += hsl(310.0/360.0, 0.8, 0.35) * (0.15 + uKick * 0.4) * g * exp(-floorT * 0.05);
+  // FOV breathes with energy — widens on drops
+  float fov = 1.5 + uEnergy*0.5 + uKick*0.3;
+  vec3 rd = normalize(fwd*fov + uv.x*right + uv.y*up);
+
+  // Gravitational lensing — intensifies as you approach the BH
+  vec3 bhPos = vec3(uCamXY, uBHZ);
+  vec3 toBH = bhPos - ro;
+  float bhDist = length(toBH);
+  vec3 bhDir = toBH / max(bhDist, 0.1);
+  float alignment = dot(rd, bhDir);
+  vec3 perpToBH = rd - bhDir * alignment;
+  float lensR = length(perpToBH);
+  if(lensR > 0.001 && bhDist > 1.0) {
+    // Lensing grows stronger as BH gets closer + kicks pulse it
+    float proximity = 8.0 / max(bhDist, 3.0);
+    float lensStrength = uBHSize * 0.12 / (lensR * bhDist + 0.5);
+    lensStrength *= proximity * (1.0 + uKick * 1.5 + uEnergy * 0.5);
+    rd = normalize(rd + perpToBH / lensR * min(lensStrength, 0.3));
   }
 
-  // Raymarch
+  // Raymarch with volumetric glow accumulation
   float dist = 0.0, minDist = 999.0;
   bool hit = false;
   vec3 p;
-  for (int i = 0; i < STEPS; i++) {
-    p = ro + rd * dist;
+  float glowAccum = 0.0;
+  float bhGlow = 0.0;
+  for(int i=0; i<STEPS; i++) {
+    p = ro + rd*dist;
     float d = sceneSDF(p);
     minDist = min(minDist, abs(d));
-    if (abs(d) < SURF) { hit = true; break; }
-    dist += abs(d) * 0.7;
-    if (dist > MAX_DIST) break;
+
+    // Volumetric glow — objects emit light proportional to proximity
+    glowAccum += exp(-abs(d) * 5.0) * 0.02 * (1.0 + uEnergy);
+
+    // Track proximity to black hole for special glow
+    float bhProx = length(p - bhPos);
+    bhGlow += exp(-bhProx * 0.3 / uBHSize) * 0.008 * (1.0 + uKick * 2.0);
+
+    if(abs(d) < SURF) { hit = true; break; }
+    dist += abs(d)*0.7;
+    if(dist > MAX_DIST) break;
   }
 
-  vec3 kickCol = hsl(310.0/360.0, 1.0, 0.55);
-  vec3 hueCol = hsl(uHue/360.0, 1.0, 0.5);
+  // Palette — hue shifts with music
+  vec3 fogCol = hsl(uHue/360.0, 0.4, 0.02);
+  vec3 kickCol = hsl(310.0/360.0, 1.0, 0.5 + uKick*0.2);
   vec3 hatCol = hsl(fract(uHue/360.0+0.5), 1.0, 0.5);
   vec3 snareCol = hsl(fract(uHue/360.0+0.25), 1.0, 0.55);
+  vec3 bhCol = mix(
+    hsl(uHue/360.0, 1.0, 0.6),
+    vec3(1.0, 0.9, 0.7),
+    0.5 + uKick * 0.3
+  );
 
-  vec3 col = bgCol;
+  vec3 col = fogCol;
 
-  if (hit) {
-    float dMain = mainSDF(p);
-    float dSat = satelliteSDF(p);
+  if(hit) {
+    float dW = tunnelWallSDF(p);
+    float dD = debrisSDF(p);
+    float dBH = attractorSDF(p);
+    float nearest = min(dW, min(dD, dBH));
 
     vec3 surfCol;
-    if (abs(dMain) < abs(dSat)) {
-      float posHue = sin(p.x * 2.0 + uTime) * 0.15 + sin(p.z * 3.0 - uTime * 0.7) * 0.1;
-      surfCol = hsl(fract(uHue/360.0 + posHue), 1.0, 0.5);
-      surfCol = mix(surfCol, kickCol, 0.3 + uKick * 0.2);
-      surfCol = mix(surfCol, hatCol, uHat * 0.25);
-      surfCol = pow(surfCol, vec3(0.85));
+    if(abs(dBH - nearest) < 0.02) {
+      // Black hole
+      vec3 bhRel = p - bhPos;
+      float distFromCenter = length(bhRel);
+      float diskDist = abs(length(bhRel.xz) - uBHSize);
+      if(distFromCenter < uBHSize * 0.35) {
+        surfCol = vec3(0.0); // event horizon = void
+      } else {
+        // Accretion disk — bright but controlled
+        float heat = exp(-diskDist * 3.0 / uBHSize);
+        float spin = sin(atan(bhRel.z, bhRel.x) * 12.0 + uTime * 6.0);
+        surfCol = mix(kickCol, bhCol, heat);
+        surfCol *= (1.5 + uKick * 1.0 + spin * 0.3 * uEnergy);
+      }
+    } else if(abs(dW - nearest) < 0.02) {
+      // Tunnel walls — FLASH on kicks, shift hue with snare
+      float posHue = sin(p.x*0.5+uTime)*0.15 + sin(p.z*0.3-uTime*0.7)*0.1;
+      surfCol = hsl(fract(uHue/360.0 + posHue + uSnare*0.1), 0.9 + uKick*0.1, 0.4 + uKick*0.2);
+      surfCol = mix(surfCol, kickCol, uKick * 0.5);
+      surfCol = mix(surfCol, hatCol, uHat * 0.3);
+      // Pulse brightness on beat
+      surfCol *= 0.7 + uKick * 1.0 + uEnergy * 0.5;
     } else {
-      surfCol = mix(snareCol, kickCol, uKick * 0.5);
-      surfCol = mix(surfCol, hatCol, uHat * 0.5);
-      surfCol = pow(surfCol, vec3(0.8));
+      // Debris — sparkle with hats
+      surfCol = mix(hatCol, snareCol, 0.5) * (1.0 + uHat * 2.0);
     }
 
-    float glow = 2.5 / (1.0 + dist * dist * 0.12);
-    float structureBoost = mix(1.0, 0.75, uEnergy * uEnergy);
-    col += surfCol * glow * (0.9 + uKick * 0.4) * structureBoost;
+    float glow = 2.5 / (1.0 + dist*dist*0.06);
+    col = surfCol * glow;
 
-    vec3 rimCol = mix(hatCol, kickCol, 0.5 + 0.5*sin(uTime));
-    float rim = smoothstep(0.01, 0.08, abs(mainSDF(p)));
-    col += rimCol * rim * 0.5 * (1.0 + uKick * 0.5);
-    col += kickCol * uKick * 0.25;
-    col += hatCol * uHat * 0.15;
+    // Edge rim that pulses with beat
+    vec3 rimCol = mix(hatCol, kickCol, 0.5+0.5*sin(uTime));
+    col += rimCol * smoothstep(0.01, 0.05, minDist) * (0.3 + uKick * 0.5);
   }
 
-  // Glow halo
-  float nearGlow = min(0.05 / (0.01 + minDist * minDist), 0.8);
-  col += mix(kickCol, hatCol, 0.5 + 0.5 * sin(uTime * 0.5)) * nearGlow * (0.2 + uEnergy * 0.3);
+  // Black hole volumetric glow — halo that grows as you approach
+  col += bhCol * min(bhGlow, 0.4) * (1.0 + uKick * 1.5);
+
+  // Volumetric glow from all objects — holographic wireframe feel
+  vec3 glowCol = mix(kickCol, hatCol, 0.5+0.5*sin(uTime*0.5));
+  col += glowCol * glowAccum * (0.6 + uEnergy);
+
+  // Near-miss halo
+  float nearGlow = min(0.05/(0.01+minDist*minDist), 0.8);
+  col += glowCol * nearGlow * (0.2 + uEnergy * 0.3);
+
+  // Kick flash — whole scene brightens on beat
+  col += kickCol * uKick * 0.08;
+
+  // Distance fog
+  float fogFactor = 1.0 - exp(-dist * uFogDensity);
+  col = mix(col, fogCol, fogFactor);
 
   // Scanlines + vignette
-  col *= 1.0 - 0.06 * step(0.5, fract(gl_FragCoord.y * 0.5)) * (1.0 + uChaos);
-  col *= 1.0 - dot(vUV*2.0-1.0, vUV*2.0-1.0) * 0.25;
+  col *= 1.0 - 0.06*step(0.5, fract(gl_FragCoord.y*0.5))*(1.0+uChaos);
+  col *= 1.0 - dot(vUV*2.0-1.0, vUV*2.0-1.0)*0.25;
 
   fragColor = vec4(col, 1.0);
 }`;
@@ -354,47 +507,40 @@ precision highp float;
 in vec2 vUV;
 out vec4 fragColor;
 uniform sampler2D uScene, uPrev;
-uniform float uTime, uEnergy, uKick, uChaos, uPhase;
+uniform float uTime, uEnergy, uKick, uChaos, uPhase, uCamSpeed;
 uniform vec2 uRes;
 
-// Film grain noise
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-// CRT barrel distortion
 vec2 crtDistort(vec2 uv) {
   vec2 cc = uv - 0.5;
   float d = dot(cc, cc) * 0.08;
   return uv + cc * d;
 }
 
-// Color grading — blend between palettes based on phase
 vec3 colorGrade(vec3 col, float phase) {
   float p = mod(phase, 4.0);
   vec3 tint;
   float strength;
 
   if (p < 1.0) {
-    // Phase 0: Cyberpunk (pink highlights, cyan shadows)
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
     vec3 shadows = vec3(0.1, 0.4, 0.5);
     vec3 highlights = vec3(1.0, 0.3, 0.6);
     tint = mix(shadows, highlights, lum);
     strength = 0.15;
   } else if (p < 2.0) {
-    // Phase 1: Acid green / toxic
     tint = mix(col, col * vec3(0.6, 1.2, 0.4), 0.3);
     return mix(col, tint, 0.5);
   } else if (p < 3.0) {
-    // Phase 2: Deep blue / cold
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
     vec3 shadows = vec3(0.05, 0.1, 0.3);
     vec3 highlights = vec3(0.7, 0.8, 1.0);
     tint = mix(shadows, highlights, lum);
     strength = 0.2;
   } else {
-    // Phase 3: Warm fire / orange
     tint = mix(col, col * vec3(1.3, 0.8, 0.4), 0.3);
     return mix(col, tint, 0.4);
   }
@@ -402,10 +548,8 @@ vec3 colorGrade(vec3 col, float phase) {
 }
 
 void main() {
-  // CRT barrel distortion
   vec2 uv = crtDistort(vUV);
 
-  // Discard pixels outside the curved screen
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     fragColor = vec4(0.0, 0.0, 0.0, 1.0);
     return;
@@ -428,8 +572,9 @@ void main() {
   bloom = max(bloom/total - ${CFG.post.bloomThreshold.toFixed(1)}, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
   col += bloom * (0.2 + uKick * ${CFG.post.bloomKickBoost.toFixed(2)});
 
-  // Feedback trail
-  vec2 prevUV = crtDistort((vUV - 0.5) * ${CFG.post.feedbackZoom.toFixed(2)} + 0.5);
+  // Feedback trail — zoom scales with camera velocity for motion blur
+  float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.006;
+  vec2 prevUV = crtDistort((vUV - 0.5) * feedbackZoom + 0.5);
   vec3 prev = texture(uPrev, prevUV).rgb * ${CFG.post.feedbackDecay.toFixed(2)};
   col = mix(col, prev, ${CFG.post.feedbackBlend.toFixed(2)});
 
@@ -444,21 +589,21 @@ void main() {
     col = mix(col, d.gbr, strip * uChaos * 0.7);
   }
 
-  // Kick flash (tinted)
+  // Kick flash
   col += vec3(1.0, 0.3, 0.6) * smoothstep(0.8, 1.0, uKick) * 0.12;
 
-  // Color grading based on evolution phase
+  // Color grading
   col = colorGrade(col, uPhase);
 
-  // Film grain — subtle noise, stronger at high chaos
+  // Film grain
   float grain = hash(uv * uRes + fract(uTime * 100.0)) - 0.5;
   col += grain * (0.03 + uChaos * 0.04);
 
-  // CRT scanlines (stronger than scene scanlines)
+  // CRT scanlines
   float scanline = sin(gl_FragCoord.y * 1.5) * 0.5 + 0.5;
   col *= 0.92 + scanline * 0.08;
 
-  // RGB subpixel pattern (subtle CRT phosphor look)
+  // RGB subpixel
   float px = mod(gl_FragCoord.x, 3.0);
   vec3 subpx = vec3(
     smoothstep(0.0, 1.0, 1.0 - abs(px - 0.5)),
@@ -467,14 +612,13 @@ void main() {
   );
   col = mix(col, col * subpx, 0.1);
 
-  // Vignette — stronger at edges for CRT tube look
+  // Vignette
   vec2 vig = vUV * 2.0 - 1.0;
   float vigF = 1.0 - dot(vig, vig) * ${CFG.post.vignetteStrength.toFixed(2)};
-  // CRT corner darkening
   vigF *= 1.0 - pow(max(abs(vig.x), abs(vig.y)), 8.0) * 0.3;
   col *= vigF;
 
-  // Tone map + saturation boost
+  // Tone map + saturation
   col = col / (1.0 + col * ${CFG.post.toneMapCompression.toFixed(2)});
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   col = mix(vec3(lum), col, ${CFG.post.saturationBoost.toFixed(2)});
@@ -517,8 +661,14 @@ function getUniforms(prog, names) {
   return u;
 }
 
-const sceneU = getUniforms(sceneProg, ['uTime','uEnergy','uKick','uSnare','uHat','uChaos','uHue','uRes','uMorph','uShapeA','uShapeB','uMouse','uCamDist','uCamHeight','uCamOrbitSpd','uCamFov']);
-const postU = getUniforms(postProg, ['uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes','uPhase']);
+const sceneU = getUniforms(sceneProg, [
+  'uTime','uEnergy','uKick','uSnare','uHat','uChaos','uHue','uRes','uMorph',
+  'uShapeA','uShapeB','uMouse','uCamZ','uTunnelBlend','uFogDensity','uRepPeriod','uObjScale',
+  'uCamXY','uCorridorR','uBHZ','uBHSize'
+]);
+const postU = getUniforms(postProg, [
+  'uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes','uPhase','uCamSpeed'
+]);
 const emptyVAO = gl.createVertexArray();
 
 // ─── Framebuffers ───────────────────────────────────────────────────
@@ -614,11 +764,11 @@ function processAudio() {
     prevBands[k] = bands[k];
     bands[k] += (raw[k] - bands[k]) * CFG.smoothAlpha;
     const delta = bands[k] - prevBands[k];
-    if (delta > bandPeaks[k] * 0.3 + 0.005) {
+    if (delta > bandPeaks[k] * 0.15 + 0.003) {
       bandPeaks[k] = Math.max(bandPeaks[k], bands[k]);
       onsetTimes.push(performance.now());
     }
-    bandPeaks[k] *= 0.995;
+    bandPeaks[k] *= 0.98;
   }
 
   let num = 0, den = 0;
@@ -632,9 +782,8 @@ function processAudio() {
 
   const now = performance.now();
   while (onsetTimes.length && onsetTimes[0] < now - 1000) onsetTimes.shift();
-  chaosMetric = Math.min(1, onsetTimes.length / 30);
+  chaosMetric = Math.min(1, onsetTimes.length / 15);
 
-  // Log-spaced frequency bars
   for (let i = 0; i < CFG.numBars; i++) {
     const f0 = Math.floor(Math.pow(i / CFG.numBars, 2) * freqData.length);
     const f1 = Math.floor(Math.pow((i + 1) / CFG.numBars, 2) * freqData.length);
@@ -693,18 +842,20 @@ function updateSpawns() {
   if (kd > th.kick) {
     spawnBurst('kick', 310);
     spawnRing(310);
-    if (Math.random() < 0.4) spawnTear();
+    spawnTear();
+    if (Math.random() < 0.5) spawnTear();
   }
   if (sd > th.snare) {
     spawnBurst('snare', 0);
-    if (sd > 0.03) spawnRing(0);
+    spawnRing(0);
+    if (Math.random() < 0.4) spawnTear();
   }
-  if (hd > th.hat) spawnBurst('hat', hueVal);
+  if (hd > th.hat) { spawnBurst('hat', hueVal); if (Math.random() < 0.3) spawnTear(); }
   if (e > CFG.peakEnergyMin && kd > th.peak) {
     spawnBurst('peak', Math.random() * 360);
     spawnRing(Math.random() * 360);
-    spawnTear();
-    if (Math.random() < 0.3) spawnTear();
+    spawnTear(); spawnTear();
+    if (Math.random() < 0.5) spawnTear();
   }
 
   prevKick = bands.sub; prevSnare = bands.low; prevHat = bands.high;
@@ -723,13 +874,13 @@ function spawnRing(hue) {
   if (shockRings.length > CFG.maxRings) shockRings.shift();
 }
 
-// ─── Starfield ──────────────────────────────────────────────────────
+// ─── Starfield (forward-streaming hyperspace) ───────────────────────
 const stars = [];
 for (let i = 0; i < CFG.numStars; i++) {
   stars.push({
     angle: Math.random() * Math.PI * 2,
-    dist: 0.1 + Math.random() * 0.9,
-    speed: 0.02 + Math.random() * 0.1,
+    dist: 0.05 + Math.random() * 1.2,
+    speed: 0.03 + Math.random() * 0.12,
     size: 1.0 + Math.random() * 2.5,
     hue: Math.random() * 360,
   });
@@ -743,10 +894,10 @@ function spawnTear() {
   tears.push({
     x: window.innerWidth * (0.5 + side * (0.25 + Math.random() * 0.25)),
     y: window.innerHeight * (0.1 + Math.random() * 0.8),
-    w: 3 + Math.random() * 8,
-    h: 30 + Math.random() * 120,
-    life: 0.3 + Math.random() * 0.5,
-    maxLife: 0.3 + Math.random() * 0.5,
+    w: 3 + Math.random() * 12,
+    h: 40 + Math.random() * 200,
+    life: 0.4 + Math.random() * 0.8,
+    maxLife: 0.4 + Math.random() * 0.8,
     hue: Math.random() * 360,
     drift: (Math.random() - 0.5) * 60,
     jagged: Math.random() < 0.5,
@@ -754,31 +905,36 @@ function spawnTear() {
   if (tears.length > CFG.maxTears) tears.shift();
 }
 
-// ─── Visual Evolution ───────────────────────────────────────────────
-let evolutionPhase = 0;
-let phaseTimer = 0;
+// ─── Evolution + Camera State ───────────────────────────────────────
+let cameraZ = 0;
+let cameraSpeed = 0;
 
-// Camera mode state
-let camMode = 0; // index into CFG.camera.modes
-let camModeTimer = 0;
-let camTransition = 0; // 0-1, blend between old and new camera
-let camPrevMode = 0;
-const camSmooth = { dist: 4.0, height: 1.5, orbitSpeed: 0.4, fovMul: 1.0 };
+// Black hole: fixed world position, you approach and pass through it
+let bhWorldZ = 40.0; // starts 40 units ahead
+let bhPassFlash = 0; // flash intensity when passing through
+
+// Evolution phase system
+let evoPhaseIdx = 0;
+let evoPhaseTimer = 0;
+const evoSmooth = {
+  repPeriod: 6.0, fogDensity: 0.06, speedMul: 1.0,
+  tunnelBlend: 0.0, objScale: 1.0, colorGrade: 0,
+};
+
+// Shape morphing
+let currentShape = 0;
+let nextShape = 1;
+let shapeTimer = 0;
+let morphProgress = 0;
+let isMorphing = false;
 
 // Mouse tracking
-let mouseX = 0.5, mouseY = 0.5; // normalized 0-1
+let mouseX = 0.5, mouseY = 0.5;
 let smoothMouseX = 0.5, smoothMouseY = 0.5;
 document.addEventListener('mousemove', e => {
   mouseX = e.clientX / window.innerWidth;
   mouseY = e.clientY / window.innerHeight;
 });
-
-// Shape morphing state
-let currentShape = 0;
-let nextShape = 1;
-let shapeTimer = 0;
-let morphProgress = 0; // 0 = fully currentShape, 1 = fully nextShape
-let isMorphing = false;
 
 // ─── Canvas 2D Helpers ──────────────────────────────────────────────
 function drawPolygon(cx, cy, r, sides, rotation, color, alpha, lineW) {
@@ -804,22 +960,39 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
   overlayTime += dt;
   const cx = W / 2, cy = H / 2;
 
-  // Starfield
-  const starSpeed = 0.3 + energy * 2.0;
+  // Vanishing point shifts with camera drift / mouse
+  const vpX = cx + (smoothMouseX - 0.5) * W * 0.3;
+  const vpY = cy + (smoothMouseY - 0.5) * H * 0.3;
+
+  // Forward-streaming starfield from vanishing point
+  const starSpeed = 0.5 + energy * 3.0 + cameraSpeed * 0.05;
   for (const s of stars) {
     s.dist += s.speed * starSpeed * dt;
-    if (s.dist > 1.2) {
-      s.dist = 0.05;
+    if (s.dist > 1.5) {
+      s.dist = 0.02;
       s.angle = Math.random() * Math.PI * 2;
       s.hue = hue + Math.random() * 60;
     }
-    const x = cx + Math.cos(s.angle) * s.dist * W * 0.55;
-    const y = cy + Math.sin(s.angle) * s.dist * H * 0.55;
+    const x = vpX + Math.cos(s.angle) * s.dist * W * 0.65;
+    const y = vpY + Math.sin(s.angle) * s.dist * H * 0.65;
     const alpha = Math.min(1, s.dist * 2) * (0.4 + energy * 0.6);
-    const sz = s.size * (0.6 + s.dist * 2.0);
+    const sz = s.size * (0.3 + s.dist * 2.5);
+
+    // Draw as streaks pointing away from vanishing point
+    const dx = x - vpX;
+    const dy = y - vpY;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = dx / len;
+    const ny = dy / len;
+    const streakLen = s.dist * starSpeed * 2.5;
+
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = `hsl(${s.hue},80%,70%)`;
-    ctx.fillRect(x - sz * 0.5, y - sz * 0.5, sz, sz);
+    ctx.strokeStyle = `hsl(${s.hue},80%,70%)`;
+    ctx.lineWidth = sz * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - nx * streakLen, y - ny * streakLen);
+    ctx.stroke();
   }
   ctx.globalAlpha = 1;
 
@@ -830,7 +1003,7 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
     for (let i = 0; i < CFG.numBars; i++) {
       const v = smoothBars[i];
       const yPos = startY + i * (barH / CFG.numBars);
-      const barLen = v * W * 0.12;
+      const barLen = v * W * 0.25;
       const barHue = 310 - i * (310 / CFG.numBars) + (hue * 0.3);
       const sat = i > CFG.numBars * 0.8 ? 60 : 100;
       const lit = 40 + v * 30;
@@ -839,39 +1012,51 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       ctx.fillRect(W - barLen, yPos, barLen, Math.max(1, barH / CFG.numBars - 2));
     }
 
-    // Circular Spectrum Ring
-    const ringR = Math.min(W, H) * 0.28;
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 128; i++) {
-      const idx = Math.floor(Math.pow(i / 128, 1.5) * freqData.length);
-      const v = freqData[Math.min(idx, freqData.length - 1)] / 255;
-      const angle = (i / 128) * Math.PI * 2 - Math.PI / 2;
-      const inner = ringR - 5;
-      const outer = ringR + v * ringR * 0.5;
-      const rHue = (hue + i * (360 / 128)) % 360;
-      ctx.strokeStyle = `hsla(${rHue},100%,${50 + v * 30}%,${0.3 + v * 0.6})`;
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
-      ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
-      ctx.stroke();
+    // Tunnel of Spectrum Rings — THE MAIN EVENT, fills the center
+    for (let depth = 0; depth < 4; depth++) {
+      const depthScale = 1.0 - depth * 0.18;
+      const depthAlpha = 1.0 - depth * 0.2;
+      const ringR = Math.min(W, H) * 0.42 * depthScale;
+      const ringCX = cx + (vpX - cx) * depth * 0.12;
+      const ringCY = cy + (vpY - cy) * depth * 0.12;
+
+      ctx.lineWidth = Math.max(2, 4 - depth);
+      for (let i = 0; i < 128; i++) {
+        const idx = Math.floor(Math.pow(i / 128, 1.5) * freqData.length);
+        const v = freqData[Math.min(idx, freqData.length - 1)] / 255;
+        const angle = (i / 128) * Math.PI * 2 - Math.PI / 2;
+        const inner = ringR - 10;
+        const outer = ringR + v * ringR * 0.8 * depthScale;
+        const rHue = (hue + i * (360 / 128) + depth * 50) % 360;
+        ctx.strokeStyle = `hsla(${rHue},100%,${55 + v * 25}%,${(0.5 + v * 0.5) * depthAlpha})`;
+        ctx.beginPath();
+        ctx.moveTo(ringCX + Math.cos(angle) * inner, ringCY + Math.sin(angle) * inner);
+        ctx.lineTo(ringCX + Math.cos(angle) * outer, ringCY + Math.sin(angle) * outer);
+        ctx.stroke();
+      }
     }
 
-    // Spinning Wireframe Shapes
+    // Spinning Wireframe Shapes with parallax
     const shapes = [
-      { x: W*0.13, y: H*0.18, sides: 5, rMul: 1.2, speed: 0.7,  band: bands.sub },
-      { x: W*0.87, y: H*0.18, sides: 3, rMul: 1.0, speed: -1.1, band: bands.low },
-      { x: W*0.13, y: H*0.82, sides: 6, rMul: 1.1, speed: 0.9,  band: bands.mid },
-      { x: W*0.87, y: H*0.82, sides: 4, rMul: 0.9, speed: -0.8, band: bands.high },
-      { x: W*0.06, y: H*0.5,  sides: 7, rMul: 0.8, speed: 0.5,  band: (bands.sub + bands.low) / 2 },
-      { x: W*0.94, y: H*0.5,  sides: 8, rMul: 0.7, speed: -0.6, band: (bands.mid + bands.high) / 2 },
+      { x: W*0.13, y: H*0.18, sides: 5, rMul: 1.2, speed: 0.7,  band: bands.sub, depth: 0.8 },
+      { x: W*0.87, y: H*0.18, sides: 3, rMul: 1.0, speed: -1.1, band: bands.low, depth: 0.5 },
+      { x: W*0.13, y: H*0.82, sides: 6, rMul: 1.1, speed: 0.9,  band: bands.mid, depth: 0.7 },
+      { x: W*0.87, y: H*0.82, sides: 4, rMul: 0.9, speed: -0.8, band: bands.high, depth: 0.4 },
+      { x: W*0.06, y: H*0.5,  sides: 7, rMul: 0.8, speed: 0.5,  band: (bands.sub + bands.low) / 2, depth: 0.9 },
+      { x: W*0.94, y: H*0.5,  sides: 8, rMul: 0.7, speed: -0.6, band: (bands.mid + bands.high) / 2, depth: 0.6 },
     ];
     for (const sh of shapes) {
-      const r = (40 + sh.band * 80) * sh.rMul;
+      // Parallax: shapes at different depths shift with mouse
+      const parallaxX = (smoothMouseX - 0.5) * sh.depth * 60;
+      const parallaxY = (smoothMouseY - 0.5) * sh.depth * 40;
+      const sx = sh.x + parallaxX;
+      const sy = sh.y + parallaxY;
+      const r = (60 + sh.band * 120) * sh.rMul;
       const rot = overlayTime * sh.speed;
       const shHue = (hue + sh.sides * 50) % 360;
-      drawPolygon(sh.x, sh.y, r, sh.sides, rot, `hsl(${shHue},100%,60%)`, 0.3 + sh.band * 0.5, 2);
-      drawPolygon(sh.x, sh.y, r*0.65, sh.sides, -rot*1.3, `hsl(${(shHue+40)%360},80%,50%)`, 0.2 + sh.band * 0.4, 1.5);
-      drawPolygon(sh.x, sh.y, r*0.35, sh.sides, rot*2, `hsl(${(shHue+80)%360},90%,55%)`, 0.15 + sh.band * 0.3, 1);
+      drawPolygon(sx, sy, r, sh.sides, rot, `hsl(${shHue},100%,60%)`, 0.35 + sh.band * 0.5, 2.5);
+      drawPolygon(sx, sy, r*0.65, sh.sides, -rot*1.3, `hsl(${(shHue+40)%360},80%,50%)`, 0.25 + sh.band * 0.4, 2);
+      drawPolygon(sx, sy, r*0.35, sh.sides, rot*2, `hsl(${(shHue+80)%360},90%,55%)`, 0.2 + sh.band * 0.3, 1.5);
     }
 
     // Bass Pulse Arcs
@@ -906,7 +1091,7 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
     }
     ctx.globalAlpha = 1;
 
-    // Shock Rings
+    // Shock Rings from vanishing point
     for (let i = shockRings.length - 1; i >= 0; i--) {
       const ring = shockRings[i];
       ring.r += ring.speed * dt;
@@ -915,7 +1100,7 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
       ctx.globalAlpha = ring.life * 0.7;
       ctx.strokeStyle = `hsl(${ring.hue},100%,65%)`;
       ctx.lineWidth = 3 + ring.life * 5;
-      ctx.beginPath(); ctx.arc(cx, cy, ring.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(vpX, vpY, ring.r, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -927,7 +1112,7 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
     t.y += t.drift * dt;
     if (t.life <= 0) { tears.splice(i, 1); continue; }
     const alpha = t.life / t.maxLife;
-    if (Math.random() < 0.3) continue; // glitchy flicker
+    if (Math.random() < 0.3) continue;
 
     ctx.globalAlpha = alpha * 0.8;
     ctx.fillStyle = `hsl(${t.hue},100%,70%)`;
@@ -950,30 +1135,26 @@ function drawOverlay(dt, W, H, energy, kick, hue) {
   }
   ctx.globalAlpha = 1;
 
-  // Visual Evolution
+  // Evolution phase visual overlays
   if (isPlaying) {
-    phaseTimer += dt;
-    if (phaseTimer > CFG.phaseDuration) {
-      phaseTimer = 0;
-      evolutionPhase = (evolutionPhase + 1) % 4;
-    }
-    const energy = totalEnergy();
+    const e = totalEnergy();
+    const phaseVisual = evoPhaseIdx % 4;
 
-    if (evolutionPhase === 1 || evolutionPhase === 3) {
-      const numLines = 5 + Math.floor(energy * 10);
+    if (phaseVisual === 1 || phaseVisual === 3) {
+      const numLines = 5 + Math.floor(e * 10);
       ctx.lineWidth = 1;
       for (let i = 0; i < numLines; i++) {
         const ly = (overlayTime * 40 + i * (H / numLines)) % H;
-        ctx.globalAlpha = 0.06 + energy * 0.08;
+        ctx.globalAlpha = 0.06 + e * 0.08;
         ctx.strokeStyle = `hsl(${(hue + i * 20) % 360},60%,50%)`;
         ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W, ly); ctx.stroke();
       }
     }
-    if (evolutionPhase === 2 || evolutionPhase === 3) {
+    if (phaseVisual === 2 || phaseVisual === 3) {
       ctx.lineWidth = 0.5;
-      ctx.globalAlpha = 0.04 + energy * 0.06;
+      ctx.globalAlpha = 0.04 + e * 0.06;
       ctx.strokeStyle = `hsl(${hue},40%,40%)`;
-      const spacing = 40 - energy * 15;
+      const spacing = 40 - e * 15;
       for (let i = -W; i < W + H; i += spacing) {
         ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + H, H); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(i + H, 0); ctx.lineTo(i, H); ctx.stroke();
@@ -1020,6 +1201,12 @@ window.addEventListener('resize', resize);
 // ─── HUD ────────────────────────────────────────────────────────────
 let showDebug = CFG.debugMode;
 if (!showDebug) hud.classList.add('hidden');
+
+// Demo mode: synthetic audio, no drop zone
+if (CFG.demoMode) {
+  dropZone.style.display = 'none';
+  isPlaying = true;
+}
 
 // ─── Audio Loading ──────────────────────────────────────────────────
 function loadAudio(file) {
@@ -1104,51 +1291,29 @@ function frame(nowMs) {
   smoothMouseX += (mouseX - smoothMouseX) * 3.0 * dt;
   smoothMouseY += (mouseY - smoothMouseY) * 3.0 * dt;
 
-  // Camera mode switching — triggered by beats or timer
-  camModeTimer += dt;
-  camTransition = Math.min(1, camTransition + dt * 3.0); // 0.33s transition
-
-  // Beat-triggered camera cut: big kick after quiet = switch
-  const kickDelta = bands.sub - prevKick;
-  if (camModeTimer > CFG.camera.modeDuration && kickDelta > 0.04 && totalEnergy() > 0.3) {
-    camPrevMode = camMode;
-    camMode = (camMode + 1 + Math.floor(Math.random() * (CFG.camera.modes.length - 1))) % CFG.camera.modes.length;
-    camModeTimer = 0;
-    camTransition = 0;
-  }
-
-  // Camera mode targets
-  const camTargets = {
-    orbit:   { dist: 4.0, height: 1.5, orbitSpeed: 0.4, fovMul: 1.0 },
-    closeup: { dist: 2.2, height: 0.8, orbitSpeed: 0.6, fovMul: 1.4 },
-    wide:    { dist: 7.0, height: 2.5, orbitSpeed: 0.25, fovMul: 0.8 },
-    side:    { dist: 3.5, height: 0.2, orbitSpeed: 0.8, fovMul: 1.1 },
-    topdown: { dist: 3.0, height: 5.0, orbitSpeed: 0.3, fovMul: 0.9 },
-  };
-  const target = camTargets[CFG.camera.modes[camMode]];
-  const lerpRate = 2.5 * dt;
-  camSmooth.dist += (target.dist - camSmooth.dist) * lerpRate;
-  camSmooth.height += (target.height - camSmooth.height) * lerpRate;
-  camSmooth.orbitSpeed += (target.orbitSpeed - camSmooth.orbitSpeed) * lerpRate;
-  camSmooth.fovMul += (target.fovMul - camSmooth.fovMul) * lerpRate;
-
-  // Shape morphing cycle
-  shapeTimer += dt;
-  if (!isMorphing && shapeTimer > CFG.shapeDuration) {
-    isMorphing = true;
-    shapeTimer = 0;
-    nextShape = (currentShape + 1) % CFG.numShapes;
-  }
-  if (isMorphing) {
-    morphProgress = Math.min(1, shapeTimer / CFG.morphDuration);
-    // Smooth ease in-out
-    morphProgress = morphProgress * morphProgress * (3 - 2 * morphProgress);
-    if (shapeTimer > CFG.morphDuration) {
-      currentShape = nextShape;
-      nextShape = (currentShape + 1) % CFG.numShapes;
-      morphProgress = 0;
-      isMorphing = false;
-      shapeTimer = 0;
+  // Demo mode: synthetic breakcore-level chaos
+  if (CFG.demoMode) {
+    const tt = t * 3.0;
+    bands.sub = 0.4 + 0.4 * Math.max(0, Math.sin(tt * 5.3)) * (0.5 + 0.5 * Math.sin(tt * 0.3));
+    bands.low = 0.3 + 0.3 * Math.abs(Math.sin(tt * 3.7 + 1.0));
+    bands.mid = 0.35 + 0.25 * Math.sin(tt * 7.1 + 2.0);
+    bands.high = 0.3 + 0.3 * Math.abs(Math.sin(tt * 11.3 + 3.0));
+    chaosMetric = 0.5 + 0.3 * Math.sin(tt * 0.9);
+    cumulativeHue += 0.8;
+    spectralCentroid = 2000 + 1500 * Math.sin(tt * 1.3);
+    // Synthetic freqData for spectrum ring
+    if (!freqData) freqData = new Uint8Array(1024);
+    for (let i = 0; i < freqData.length; i++) {
+      const f = i / freqData.length;
+      freqData[i] = Math.floor(255 * Math.max(0,
+        (1.0 - f * 1.5) * (0.5 + 0.5 * Math.sin(tt * 4.0 + i * 0.1)) *
+        (0.6 + 0.4 * Math.sin(tt * 7.0 + f * 20.0))
+      ));
+    }
+    // Synthetic smoothBars
+    for (let i = 0; i < CFG.numBars; i++) {
+      const f = i / CFG.numBars;
+      smoothBars[i] = Math.max(0, (1.0 - f) * (0.4 + 0.4 * Math.sin(tt * 3.0 + i * 0.3)));
     }
   }
 
@@ -1161,7 +1326,74 @@ function frame(nowMs) {
   const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
   const time = t - t0;
 
-  // Pass 1: Scene (half res)
+  // ── Evolution phase system ──
+  evoPhaseTimer += dt;
+  const kickDelta = bands.sub - prevKick;
+  // Beat-triggered or timed phase advance
+  if (evoPhaseTimer > CFG.phaseDuration && (kickDelta > 0.01 || evoPhaseTimer > CFG.phaseDuration * 1.5)) {
+    evoPhaseTimer = 0;
+    evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
+  }
+
+  // Smooth lerp toward current phase targets
+  const target = CFG.evoPhases[evoPhaseIdx];
+  const evoLerp = 2.0 * dt;
+  evoSmooth.repPeriod += (target.repPeriod - evoSmooth.repPeriod) * evoLerp;
+  evoSmooth.fogDensity += (target.fogDensity - evoSmooth.fogDensity) * evoLerp;
+  evoSmooth.speedMul += (target.speedMul - evoSmooth.speedMul) * evoLerp;
+  evoSmooth.tunnelBlend += (target.tunnelBlend - evoSmooth.tunnelBlend) * evoLerp;
+  evoSmooth.objScale += (target.objScale - evoSmooth.objScale) * evoLerp;
+  evoSmooth.colorGrade += (target.colorGrade - evoSmooth.colorGrade) * evoLerp;
+
+  // ── Forward camera ──
+  const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed) * evoSmooth.speedMul;
+  cameraZ += forwardSpeed * dt;
+  if (kickDelta > 0.015) {
+    cameraZ += CFG.camKickImpulse;
+  }
+  cameraSpeed = forwardSpeed;
+  // Camera XY drift (must match shader formula)
+  const mOff = [(smoothMouseX - 0.5) * 2, (smoothMouseY - 0.5) * 2];
+  const camDriftX = Math.sin(time * 0.23) * 2.0 + Math.cos(time * 0.17) * 1.5 + mOff[0] * 2.0;
+  const camDriftY = Math.sin(time * 0.19) * 1.5 + Math.cos(time * 0.31) * 1.0 - mOff[1] * 1.5;
+
+  // Black hole: FIXED target — you approach it, pass through, new one spawns
+  const bhDist = bhWorldZ - cameraZ; // how far ahead the BH is
+  if (bhDist < 2.0) {
+    // Passed through — flash and spawn new one further ahead
+    bhPassFlash = 1.0;
+    bhWorldZ = cameraZ + 35.0 + Math.random() * 25.0;
+    // Trigger evolution phase change on passage
+    evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
+    evoPhaseTimer = 0;
+  }
+  bhPassFlash *= 0.92; // decay the flash
+
+  // BH apparent size grows as you approach — capped so it doesn't fill the screen
+  const bhApproachFactor = Math.max(0.2, Math.min(1.0, 15.0 / Math.max(bhDist, 1.0)));
+  const bhZ = bhWorldZ;
+  const bhSize = (1.5 + energy * 0.8 + kick * 0.5) * bhApproachFactor;
+
+  // ── Shape morphing ──
+  shapeTimer += dt;
+  if (!isMorphing && shapeTimer > CFG.shapeDuration) {
+    isMorphing = true;
+    shapeTimer = 0;
+    nextShape = (currentShape + 1) % CFG.numShapes;
+  }
+  if (isMorphing) {
+    morphProgress = Math.min(1, shapeTimer / CFG.morphDuration);
+    morphProgress = morphProgress * morphProgress * (3 - 2 * morphProgress);
+    if (shapeTimer > CFG.morphDuration) {
+      currentShape = nextShape;
+      nextShape = (currentShape + 1) % CFG.numShapes;
+      morphProgress = 0;
+      isMorphing = false;
+      shapeTimer = 0;
+    }
+  }
+
+  // ── Pass 1: Scene (half res) ──
   gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFB.fb);
   gl.viewport(0, 0, sceneW, sceneH);
   gl.useProgram(sceneProg);
@@ -1173,17 +1405,22 @@ function frame(nowMs) {
   gl.uniform1f(sceneU.uChaos, chaos);
   gl.uniform1f(sceneU.uHue, hue);
   gl.uniform2f(sceneU.uMouse, smoothMouseX, smoothMouseY);
-  gl.uniform1f(sceneU.uCamDist, camSmooth.dist);
-  gl.uniform1f(sceneU.uCamHeight, camSmooth.height);
-  gl.uniform1f(sceneU.uCamOrbitSpd, camSmooth.orbitSpeed);
-  gl.uniform1f(sceneU.uCamFov, camSmooth.fovMul);
+  gl.uniform1f(sceneU.uCamZ, cameraZ);
+  gl.uniform1f(sceneU.uTunnelBlend, evoSmooth.tunnelBlend);
+  gl.uniform1f(sceneU.uFogDensity, evoSmooth.fogDensity);
+  gl.uniform1f(sceneU.uRepPeriod, evoSmooth.repPeriod);
+  gl.uniform1f(sceneU.uObjScale, evoSmooth.objScale);
+  gl.uniform2f(sceneU.uCamXY, camDriftX, camDriftY);
+  gl.uniform1f(sceneU.uCorridorR, CFG.corridorRadius);
+  gl.uniform1f(sceneU.uBHZ, bhZ);
+  gl.uniform1f(sceneU.uBHSize, bhSize);
   gl.uniform1f(sceneU.uMorph, morphProgress);
   gl.uniform1i(sceneU.uShapeA, currentShape);
   gl.uniform1i(sceneU.uShapeB, nextShape);
   gl.uniform2f(sceneU.uRes, sceneW, sceneH);
   drawFullscreenTriangle();
 
-  // Pass 2: Post-processing (full res)
+  // ── Pass 2: Post-processing (full res) ──
   const src = ppFB[ppIdx], dst = ppFB[1 - ppIdx];
   gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
   gl.viewport(0, 0, screenW, screenH);
@@ -1194,7 +1431,8 @@ function frame(nowMs) {
   gl.uniform1f(postU.uEnergy, energy);
   gl.uniform1f(postU.uKick, kick);
   gl.uniform1f(postU.uChaos, chaos);
-  gl.uniform1f(postU.uPhase, evolutionPhase + phaseTimer / CFG.phaseDuration);
+  gl.uniform1f(postU.uPhase, evoSmooth.colorGrade);
+  gl.uniform1f(postU.uCamSpeed, cameraSpeed);
   gl.uniform2f(postU.uRes, screenW, screenH);
   drawFullscreenTriangle();
 
@@ -1218,13 +1456,14 @@ function frame(nowMs) {
     document.getElementById('hud-chaos').textContent = 'Chaos: ' + chaos.toFixed(2);
     document.getElementById('hud-band').textContent = `K:${kick.toFixed(2)} S:${snare.toFixed(2)} H:${hat.toFixed(2)}`;
     const shapeNames = ['protein','crystal','jellyfish','blackhole'];
-    document.getElementById('hud-particles').textContent = `P:${aliveP}/${CFG.maxParticles} Cam:${CFG.camera.modes[camMode]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''}`;
-
+    const phaseNames = CFG.evoPhases.map((_,i) => `P${i}`);
+    document.getElementById('hud-extra').textContent =
+      `P:${aliveP}/${CFG.maxParticles} Z:${cameraZ.toFixed(0)} Spd:${cameraSpeed.toFixed(1)} Phase:${phaseNames[evoPhaseIdx]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''}`;
   }
 }
 
 requestAnimationFrame(frame);
-console.log('Breakcore Visualizer v4 — WebGL2 + GLSL + Canvas 2D overlay');
+console.log('Breakcore Visualizer v5 — Immersive Void — WebGL2 + GLSL + Canvas 2D overlay');
 </script>
 </body>
 </html>
