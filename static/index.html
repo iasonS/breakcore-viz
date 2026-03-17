@@ -2456,9 +2456,10 @@ function frame(nowMs) {
 
   // Autonomous drift — slow modulations proportional to repetition
   const rep = lookAhead.repetition;
-  autoDrift.fogBreath = rep * 0.3 * Math.sin(time * 0.25); // 15-30s period breathing
-  autoDrift.corridorR = rep * 0.75 * Math.sin(time * 0.2);  // oscillate +-0.75
-  autoDrift.objScaleMod = rep * 0.15 * Math.sin(time * 0.18); // subtle scale breathing
+  const elapsed = t - t0;
+  autoDrift.fogBreath = rep * 0.3 * Math.sin(elapsed * 0.25);
+  autoDrift.corridorR = rep * 0.75 * Math.sin(elapsed * 0.2);
+  autoDrift.objScaleMod = rep * 0.15 * Math.sin(elapsed * 0.18);
   autoDrift.hueDriftBoost = 0; // no hue drift in monochrome mode
 
   updateSpawns();
