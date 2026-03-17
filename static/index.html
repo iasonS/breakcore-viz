@@ -484,9 +484,8 @@ void main() {
   vec2 uv = (vUV*2.0-1.0) * vec2(uRes.x/uRes.y, 1.0);
 
   // Forward-flying camera
-  vec2 mOff = (uMouse - 0.5)*2.0;
-  float driftX = sin(uTime*0.23)*2.0 + cos(uTime*0.17)*1.5 + mOff.x*2.0;
-  float driftY = sin(uTime*0.19)*1.5 + cos(uTime*0.31)*1.0 - mOff.y*1.5;
+  float driftX = sin(uTime*0.23)*2.0 + cos(uTime*0.17)*1.5;
+  float driftY = sin(uTime*0.19)*1.5 + cos(uTime*0.31)*1.0;
 
   float shakeGate = smoothstep(0.3, 0.7, uEnergy);
   vec3 shake = vec3(
