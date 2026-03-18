@@ -102,7 +102,7 @@ const CFG = {
 
   // Shader tuning
   scene: {
-    steps: 36, maxDist: 35.0, surfThreshold: 0.018,
+    steps: 28, maxDist: 30.0, surfThreshold: 0.022,
   },
   post: {
     bloomThreshold: 0.5, bloomIntensity: 1.2, bloomKickBoost: 0.25,
@@ -852,7 +852,7 @@ function rebuildFBs() {
   const w = glCanvas.width, h = glCanvas.height;
   if (w === screenW && h === screenH) return;
   screenW = w; screenH = h;
-  sceneW = Math.floor(w * 0.75); sceneH = Math.floor(h * 0.75);
+  sceneW = w; sceneH = h;
   for (const o of [sceneFB, ppFB[0], ppFB[1]]) {
     if (o.fb) gl.deleteFramebuffer(o.fb);
     if (o.tex) gl.deleteTexture(o.tex);
@@ -2435,7 +2435,8 @@ function frame(nowMs) {
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, dst.fb);
   gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   gl.viewport(0, 0, screenW, screenH);
-  gl.blitFramebuffer(0, 0, screenW, screenH, 0, 0, screenW, screenH, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  gl.blitFramebuffer(0, 0, screenW, screenH, 0, 0, screenW, screenH, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+  gl.finish();
   ppIdx = 1 - ppIdx;
 
   // Canvas 2D overlay
