@@ -95,10 +95,10 @@ const CFG = {
   numShapes: 4,        // protein, crystal, jellyfish, blackhole
 
   // Forward camera
-  camBaseSpeed: 4.0,
-  camBoostSpeed: 8.0,
-  camKickImpulse: 0.8,
-  corridorRadius: 3.5, // tunnel wall minimum radius from camera path
+  camBaseSpeed: 6.0,
+  camBoostSpeed: 12.0,
+  camKickImpulse: 1.2,
+  corridorRadius: 2.5, // tunnel wall minimum radius from camera path — tight for flyby intensity
 
   // Shader tuning
   scene: {
@@ -113,12 +113,12 @@ const CFG = {
 
   // Evolution phases — each defines a distinct "place"
   evoPhases: [
-    { repPeriod: 7.0, fogDensity: 0.04, speedMul: 1.0, tunnelBlend: 0.0, objScale: 0.8, colorGrade: 0 },
-    { repPeriod: 5.0, fogDensity: 0.05, speedMul: 1.3, tunnelBlend: 0.0, objScale: 0.7, colorGrade: 1 },
-    { repPeriod: 9.0, fogDensity: 0.035, speedMul: 0.7, tunnelBlend: 0.0, objScale: 1.0, colorGrade: 2 },
-    { repPeriod: 6.0, fogDensity: 0.045, speedMul: 1.2, tunnelBlend: 0.4, objScale: 0.75, colorGrade: 3 },
-    { repPeriod: 4.5, fogDensity: 0.06, speedMul: 1.8, tunnelBlend: 0.6, objScale: 0.6, colorGrade: 0 },
-    { repPeriod: 10.0, fogDensity: 0.03, speedMul: 0.5, tunnelBlend: 0.0, objScale: 1.0, colorGrade: 2 },
+    { repPeriod: 5.0, fogDensity: 0.03, speedMul: 1.2, tunnelBlend: 0.0, objScale: 0.9, colorGrade: 0 },
+    { repPeriod: 3.5, fogDensity: 0.04, speedMul: 1.6, tunnelBlend: 0.0, objScale: 0.8, colorGrade: 1 },
+    { repPeriod: 6.0, fogDensity: 0.025, speedMul: 0.9, tunnelBlend: 0.0, objScale: 1.1, colorGrade: 2 },
+    { repPeriod: 4.0, fogDensity: 0.035, speedMul: 1.5, tunnelBlend: 0.4, objScale: 0.85, colorGrade: 3 },
+    { repPeriod: 3.0, fogDensity: 0.045, speedMul: 2.2, tunnelBlend: 0.6, objScale: 0.7, colorGrade: 0 },
+    { repPeriod: 7.0, fogDensity: 0.02, speedMul: 0.7, tunnelBlend: 0.0, objScale: 1.2, colorGrade: 2 },
   ],
 
   // HUD
@@ -142,7 +142,7 @@ const hud = document.getElementById('hud');
 const dropZone = document.getElementById('drop-zone');
 
 // ─── WebGL2 ─────────────────────────────────────────────────────────
-const gl = glCanvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance' });
+const gl = glCanvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance', desynchronized: false });
 if (!gl) { showError('WebGL2 not supported'); throw 'no webgl2'; }
 const floatExt = gl.getExtension('EXT_color_buffer_float');
 gl.getExtension('OES_texture_float_linear');
@@ -267,9 +267,9 @@ float tunnelWallSDF(vec3 p) {
   float a = atan(rel.y, rel.x);
 
   // Domain repeat around the ring and along Z
-  float angCount = 10.0;
+  float angCount = 14.0;
   float angPeriod = 6.283 / angCount;
-  float zPeriod = uRepPeriod;
+  float zPeriod = uRepPeriod * 0.7;
 
   float cellA = floor(a / angPeriod + 0.5);
   float cellZ = floor(p.z / zPeriod + 0.5);
@@ -278,8 +278,8 @@ float tunnelWallSDF(vec3 p) {
 
   vec3 h = hash31(vec3(cellA, cellZ, 0.0));
 
-  // Place objects at fixed radius from camera (tunnel wall — far enough to frame)
-  float wallR = uCorridorR + 2.5 + h.x * 3.0;
+  // Place objects at fixed radius from camera — close for intensity
+  float wallR = uCorridorR + 1.5 + h.x * 2.5;
   float objAngle = cellA * angPeriod;
   vec3 objPos = vec3(
     uCamXY.x + cos(objAngle) * wallR,
@@ -304,13 +304,13 @@ float debrisSDF(vec3 p) {
   if(r < uCorridorR * 0.7) return 20.0;
 
   float a = atan(rel.y, rel.x);
-  float angPeriod = 6.283 / 20.0;
-  float zPeriod = 2.5;
+  float angPeriod = 6.283 / 28.0;
+  float zPeriod = 1.8;
   float cellA = floor(a / angPeriod + 0.5);
   float cellZ = floor(p.z / zPeriod + 0.5);
 
   vec3 h = hash31(vec3(cellA, cellZ, 100.0));
-  float debR = uCorridorR + 0.5 + h.x * 3.0;
+  float debR = uCorridorR + 0.3 + h.x * 2.5;
   float objAngle = cellA * angPeriod;
   vec3 objPos = vec3(
     uCamXY.x + cos(objAngle) * debR,
@@ -318,13 +318,13 @@ float debrisSDF(vec3 p) {
     cellZ * zPeriod + (h.z - 0.5) * zPeriod * 0.3
   );
 
-  float sz = (0.02 + h.y * 0.08) * uObjScale;
+  float sz = (0.03 + h.y * 0.12) * uObjScale;
   return length(p - objPos) - sz;
 }
 
 // ── Corridor dust: tiny sparks that fly through the center ──
 float dustSDF(vec3 p) {
-  float zPeriod = 1.8;
+  float zPeriod = 1.2;
   float cellZ = floor(p.z / zPeriod + 0.5);
   float localZ = p.z - cellZ * zPeriod;
 
@@ -354,7 +354,7 @@ float energyRingSDF(vec3 p) {
   float r = length(rel);
   // Ring at middle distance between camera and tunnel walls
   float ringR = uCorridorR * 0.6 + uEnergy * 0.5;
-  float zPeriod = 4.0 + uKick * 1.0;
+  float zPeriod = 3.0 + uKick * 0.8;
   float cellZ = floor(p.z / zPeriod + 0.5);
   float localZ = p.z - cellZ * zPeriod;
 
@@ -410,7 +410,7 @@ float attractorSDF(vec3 p) {
 
 // ── Megastructures: colossal geometry in the far distance ──
 float megastructureSDF(vec3 p) {
-  float megaPeriod = 40.0;
+  float megaPeriod = 25.0;
   float cellZ = floor(p.z / megaPeriod + 0.5);
   float localZ = p.z - cellZ * megaPeriod;
 
@@ -418,7 +418,7 @@ float megastructureSDF(vec3 p) {
   vec3 h2 = hash31(vec3(cellZ, 1.0, 999.0));
 
   // Place far from camera path — these are background architecture
-  float megaR = uCorridorR + 8.0 + h.x * 12.0;
+  float megaR = uCorridorR + 5.0 + h.x * 8.0;
   float megaAngle = h.y * 6.283;
   vec3 center = vec3(
     uCamXY.x + cos(megaAngle) * megaR,
@@ -536,7 +536,7 @@ void main() {
     minDist = min(minDist, abs(d));
 
     // Volumetric glow — objects emit light proportional to proximity
-    glowAccum += exp(-abs(d) * 5.0) * 0.01 * (0.3 + uKick * 1.7);
+    glowAccum += exp(-abs(d) * 4.0) * 0.015 * (0.4 + uKick * 2.0);
 
     // Track proximity to black hole for special glow — scales with BH size
     float bhProx = length(p - bhPos);
@@ -592,12 +592,12 @@ void main() {
       }
     } else if(abs(dER - nearest) < 0.02) {
       // Energy rings — hot white-cyan, pulse with kick
-      float ringGlow = 0.3 + uKick * 2.5;
+      float ringGlow = 0.5 + uKick * 3.0;
       surfCol = mix(vec3(0.3, 0.8, 1.0), vec3(1.0, 0.6, 0.9), uKick * 0.6 + sin(uTime * 2.0) * 0.3);
       surfCol *= ringGlow;
     } else if(abs(dDu - nearest) < 0.02) {
       // Corridor dust — bright white-blue sparks, flash on hats
-      surfCol = mix(vec3(0.7, 0.85, 1.0), hatCol, 0.3) * (0.4 + uKick*1.5 + uHat*2.0);
+      surfCol = mix(vec3(0.7, 0.85, 1.0), hatCol, 0.3) * (0.6 + uKick*2.0 + uHat*2.5);
     } else if(abs(dMG - nearest) < 0.02) {
       // Megastructures — dark silhouettes with edge glow
       vec3 megaEdge = hsl(fract(uHue/360.0 + 0.15), 0.6, 0.3);
@@ -611,10 +611,10 @@ void main() {
       surfCol = hsl(fract(uHue/360.0 + posHue + uSnare*0.1), 0.9 + uKick*0.1, 0.4 + uKick*0.2);
       surfCol = mix(surfCol, kickCol, uKick * 0.5);
       surfCol = mix(surfCol, hatCol, uHat * 0.3);
-      surfCol *= 0.45 + uKick * 1.8;
+      surfCol *= 0.6 + uKick * 2.2;
     } else {
       // Debris
-      surfCol = mix(hatCol, snareCol, 0.5) * (0.5 + uKick*1.0 + uHat*1.8);
+      surfCol = mix(hatCol, snareCol, 0.5) * (0.7 + uKick*1.5 + uHat*2.2);
     }
 
     float glow = (1.0 + uKick*2.0) / (1.0 + dist*0.08);
@@ -757,19 +757,6 @@ void main() {
   // Film grain
   float grain = hash(uv * uRes + fract(uTime * 100.0)) - 0.5;
   col += grain * (0.03 + uChaos * 0.04);
-
-  // CRT scanlines — very subtle
-  float scanline = sin(gl_FragCoord.y * 1.5) * 0.5 + 0.5;
-  col *= 0.96 + scanline * 0.04;
-
-  // RGB subpixel
-  float px = mod(gl_FragCoord.x, 3.0);
-  vec3 subpx = vec3(
-    smoothstep(0.0, 1.0, 1.0 - abs(px - 0.5)),
-    smoothstep(0.0, 1.0, 1.0 - abs(px - 1.5)),
-    smoothstep(0.0, 1.0, 1.0 - abs(px - 2.5))
-  );
-  col = mix(col, col * subpx, 0.1);
 
   // Vignette — very subtle
   vec2 vig = vUV * 2.0 - 1.0;
@@ -2325,8 +2312,8 @@ function frame(nowMs) {
     sectionSpeedMul = 0.6 + energyHistory.trendDuration * 0.15; // gradually accelerate
     sectionFogMul = 0.8 + energyHistory.trendDuration * 0.05;   // minimal fog increase
   } else if (section === 'drop') {
-    sectionSpeedMul = 2.5; // blast forward
-    sectionFogMul = 0.7;   // clear for impact
+    sectionSpeedMul = 3.5; // blast forward hard
+    sectionFogMul = 0.5;   // clear for impact — see everything
   }
 
   // Look-ahead anticipation effects (Phase 2C) — only when offline data available
@@ -2339,7 +2326,7 @@ function frame(nowMs) {
   }
 
   // ── Forward camera ──
-  const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed + kick * 4.0) * evoSmooth.speedMul * sectionSpeedMul;
+  const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed + kick * 6.0) * evoSmooth.speedMul * sectionSpeedMul;
   cameraZ += forwardSpeed * dt;
   if (kickDelta * percGate > 0.015) {
     cameraZ += CFG.camKickImpulse * (section === 'drop' ? 3.0 : 1.0);
