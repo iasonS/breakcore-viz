@@ -102,23 +102,23 @@ const CFG = {
 
   // Shader tuning
   scene: {
-    steps: 44, maxDist: 40.0, surfThreshold: 0.015,
+    steps: 36, maxDist: 35.0, surfThreshold: 0.018,
   },
   post: {
     bloomThreshold: 0.5, bloomIntensity: 1.2, bloomKickBoost: 0.25,
     feedbackBaseZoom: 0.98, feedbackDecay: 0.82, feedbackBlend: 0.2,
-    vignetteStrength: 0.45, toneMapCompression: 0.25, saturationBoost: 1.25,
-    maxBrightness: 0.93,
+    vignetteStrength: 0.3, toneMapCompression: 0.2, saturationBoost: 1.35,
+    maxBrightness: 1.0,
   },
 
   // Evolution phases — each defines a distinct "place"
   evoPhases: [
-    { repPeriod: 7.0, fogDensity: 0.06, speedMul: 1.0, tunnelBlend: 0.0, objScale: 0.8, colorGrade: 0 },
-    { repPeriod: 5.0, fogDensity: 0.08, speedMul: 1.3, tunnelBlend: 0.0, objScale: 0.7, colorGrade: 1 },
-    { repPeriod: 9.0, fogDensity: 0.05, speedMul: 0.7, tunnelBlend: 0.0, objScale: 1.0, colorGrade: 2 },
-    { repPeriod: 6.0, fogDensity: 0.07, speedMul: 1.2, tunnelBlend: 0.4, objScale: 0.75, colorGrade: 3 },
-    { repPeriod: 4.5, fogDensity: 0.10, speedMul: 1.8, tunnelBlend: 0.6, objScale: 0.6, colorGrade: 0 },
-    { repPeriod: 10.0, fogDensity: 0.04, speedMul: 0.5, tunnelBlend: 0.0, objScale: 1.0, colorGrade: 2 },
+    { repPeriod: 7.0, fogDensity: 0.04, speedMul: 1.0, tunnelBlend: 0.0, objScale: 0.8, colorGrade: 0 },
+    { repPeriod: 5.0, fogDensity: 0.05, speedMul: 1.3, tunnelBlend: 0.0, objScale: 0.7, colorGrade: 1 },
+    { repPeriod: 9.0, fogDensity: 0.035, speedMul: 0.7, tunnelBlend: 0.0, objScale: 1.0, colorGrade: 2 },
+    { repPeriod: 6.0, fogDensity: 0.045, speedMul: 1.2, tunnelBlend: 0.4, objScale: 0.75, colorGrade: 3 },
+    { repPeriod: 4.5, fogDensity: 0.06, speedMul: 1.8, tunnelBlend: 0.6, objScale: 0.6, colorGrade: 0 },
+    { repPeriod: 10.0, fogDensity: 0.03, speedMul: 0.5, tunnelBlend: 0.0, objScale: 1.0, colorGrade: 2 },
   ],
 
   // HUD
@@ -142,7 +142,7 @@ const hud = document.getElementById('hud');
 const dropZone = document.getElementById('drop-zone');
 
 // ─── WebGL2 ─────────────────────────────────────────────────────────
-const gl = glCanvas.getContext('webgl2', { antialias: false, alpha: false });
+const gl = glCanvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance' });
 if (!gl) { showError('WebGL2 not supported'); throw 'no webgl2'; }
 const floatExt = gl.getExtension('EXT_color_buffer_float');
 gl.getExtension('OES_texture_float_linear');
@@ -484,8 +484,8 @@ void main() {
   vec2 uv = (vUV*2.0-1.0) * vec2(uRes.x/uRes.y, 1.0);
 
   // Forward-flying camera
-  float driftX = sin(uTime*0.23)*2.0 + cos(uTime*0.17)*1.5;
-  float driftY = sin(uTime*0.19)*1.5 + cos(uTime*0.31)*1.0;
+  float driftX = 0.0;
+  float driftY = 0.0;
 
   float shakeGate = smoothstep(0.3, 0.7, uEnergy);
   vec3 shake = vec3(
@@ -495,11 +495,7 @@ void main() {
   ) * shakeGate;
 
   vec3 ro = vec3(driftX, driftY, uCamZ) + shake;
-  vec3 lookAt = ro + vec3(
-    sin(uTime*0.1)*0.12,
-    cos(uTime*0.13)*0.08,
-    5.0
-  );
+  vec3 lookAt = ro + vec3(0.0, 0.0, 5.0);
 
   // Camera roll from chaos
   float roll = sin(uTime*0.15)*0.15 + uChaos*sin(uTime*2.0)*0.2;
@@ -552,7 +548,7 @@ void main() {
   }
 
   // Palette — hue shifts with music
-  vec3 fogCol = hsl(uHue/360.0, 0.4, 0.02);
+  vec3 fogCol = hsl(uHue/360.0, 0.3, 0.015);
   vec3 kickCol = hsl(310.0/360.0, 1.0, 0.5 + uKick*0.2);
   vec3 hatCol = hsl(fract(uHue/360.0+0.5), 1.0, 0.5);
   vec3 snareCol = hsl(fract(uHue/360.0+0.25), 1.0, 0.55);
@@ -605,7 +601,7 @@ void main() {
     } else if(abs(dMG - nearest) < 0.02) {
       // Megastructures — dark silhouettes with edge glow
       vec3 megaEdge = hsl(fract(uHue/360.0 + 0.15), 0.6, 0.3);
-      surfCol = megaEdge * (0.15 + uEnergy * 0.2 + uKick * 0.3);
+      surfCol = megaEdge * (0.3 + uEnergy * 0.3 + uKick * 0.4);
       // Subtle pulse along surface
       float edgePulse = sin(p.z * 0.5 + uTime * 0.8) * 0.5 + 0.5;
       surfCol += megaEdge * edgePulse * 0.1;
@@ -615,13 +611,13 @@ void main() {
       surfCol = hsl(fract(uHue/360.0 + posHue + uSnare*0.1), 0.9 + uKick*0.1, 0.4 + uKick*0.2);
       surfCol = mix(surfCol, kickCol, uKick * 0.5);
       surfCol = mix(surfCol, hatCol, uHat * 0.3);
-      surfCol *= 0.25 + uKick * 1.5;
+      surfCol *= 0.45 + uKick * 1.8;
     } else {
       // Debris
-      surfCol = mix(hatCol, snareCol, 0.5) * (0.3 + uKick*0.8 + uHat*1.5);
+      surfCol = mix(hatCol, snareCol, 0.5) * (0.5 + uKick*1.0 + uHat*1.8);
     }
 
-    float glow = (0.5 + uKick*2.0) / (1.0 + dist*dist*0.06);
+    float glow = (1.0 + uKick*2.0) / (1.0 + dist*0.08);
     col = surfCol * glow;
 
     // Edge rim that pulses with beat
@@ -634,14 +630,15 @@ void main() {
 
   // Volumetric glow from all objects — holographic wireframe feel
   vec3 glowCol = mix(kickCol, hatCol, 0.5+0.5*sin(uTime*0.5));
-  col += glowCol * glowAccum * (0.3 + uKick * 0.7);
+  col += glowCol * glowAccum * (0.5 + uKick * 1.0);
 
   // Near-miss halo
   float nearGlow = min(0.05/(0.01+minDist*minDist), 0.8);
-  col += glowCol * nearGlow * (0.05 + uKick * 0.3);
+  col += glowCol * nearGlow * (0.1 + uKick * 0.4);
 
-  // Distance fog
+  // Distance fog — capped so side objects stay vivid
   float fogFactor = 1.0 - exp(-dist * uFogDensity);
+  fogFactor = min(fogFactor, 0.4);
   col = mix(col, fogCol, fogFactor);
 
   fragColor = vec4(col, 1.0);
@@ -659,10 +656,12 @@ float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-vec2 crtDistort(vec2 uv) {
-  vec2 cc = uv - 0.5;
-  float d = dot(cc, cc) * 0.08;
-  return uv + cc * d;
+vec3 sampleScene(vec2 uv) {
+  return texture(uScene, clamp(uv, 0.002, 0.998)).rgb;
+}
+
+vec3 samplePrev(vec2 uv) {
+  return texture(uPrev, clamp(uv, 0.002, 0.998)).rgb;
 }
 
 vec3 colorGrade(vec3 col, float phase) {
@@ -672,33 +671,28 @@ vec3 colorGrade(vec3 col, float phase) {
 
   if (p < 1.0) {
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
-    vec3 shadows = vec3(0.1, 0.4, 0.5);
-    vec3 highlights = vec3(1.0, 0.3, 0.6);
+    vec3 shadows = vec3(0.3, 0.5, 0.6);
+    vec3 highlights = vec3(1.0, 0.4, 0.7);
     tint = mix(shadows, highlights, lum);
-    strength = 0.15;
+    strength = 0.1;
   } else if (p < 2.0) {
-    tint = mix(col, col * vec3(0.6, 1.2, 0.4), 0.3);
-    return mix(col, tint, 0.5);
+    tint = mix(col, col * vec3(0.7, 1.2, 0.5), 0.3);
+    return mix(col, tint, 0.3);
   } else if (p < 3.0) {
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
-    vec3 shadows = vec3(0.05, 0.1, 0.3);
-    vec3 highlights = vec3(0.7, 0.8, 1.0);
+    vec3 shadows = vec3(0.2, 0.3, 0.5);
+    vec3 highlights = vec3(0.8, 0.9, 1.0);
     tint = mix(shadows, highlights, lum);
-    strength = 0.2;
+    strength = 0.12;
   } else {
-    tint = mix(col, col * vec3(1.3, 0.8, 0.4), 0.3);
-    return mix(col, tint, 0.4);
+    tint = mix(col, col * vec3(1.3, 0.9, 0.5), 0.3);
+    return mix(col, tint, 0.3);
   }
   return mix(col, tint, strength);
 }
 
 void main() {
-  vec2 uv = crtDistort(vUV);
-
-  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
-    return;
-  }
+  vec2 uv = vUV;
 
   // Gravity wave distortion on impact
   if (uImpact > 0.01) {
@@ -708,55 +702,38 @@ void main() {
     uv += normalize(center + 0.001) * wave;
   }
 
+  // Scene color — no chromatic aberration
+  vec3 col = sampleScene(uv);
+
   // Radial zoom blur on impact
-  float ca = min(0.008, 0.001 + uChaos * 0.003 + uKick * 0.004 + uImpact * 0.004);
-  vec3 col;
   if (uImpact > 0.1) {
-    col = vec3(0.0);
+    vec3 blurred = vec3(0.0);
     vec2 dir = uv - 0.5;
     for (int i = 0; i < 6; i++) {
       float t = float(i) / 6.0 * uImpact * 0.03;
-      col += texture(uScene, uv - dir * t).rgb;
+      blurred += sampleScene(uv - dir * t);
     }
-    col /= 6.0;
-    // Still apply CA on top
-    col.r = mix(col.r, texture(uScene, uv + vec2(ca, 0.0)).r, 0.5);
-    col.b = mix(col.b, texture(uScene, uv - vec2(ca, 0.0)).b, 0.5);
-  } else {
-    col.r = texture(uScene, uv + vec2(ca, 0.0)).r;
-    col.g = texture(uScene, uv).g;
-    col.b = texture(uScene, uv - vec2(ca, 0.0)).b;
+    col = blurred / 6.0;
   }
 
   // Bloom
   vec3 bloom = vec3(0.0); float total = 0.0;
-  for (int i = -3; i <= 3; i++) {
-    float w = exp(-float(i*i)/4.5);
-    bloom += texture(uScene, uv + vec2(float(i)/uRes.x*5.0, 0.0)).rgb * w;
-    bloom += texture(uScene, uv + vec2(0.0, float(i)/uRes.y*5.0)).rgb * w;
+  for (int i = -2; i <= 2; i++) {
+    float w = exp(-float(i*i)/3.0);
+    bloom += sampleScene(uv + vec2(float(i)/uRes.x*4.0, 0.0)) * w;
+    bloom += sampleScene(uv + vec2(0.0, float(i)/uRes.y*4.0)) * w;
     total += w * 2.0;
   }
   bloom = max(bloom/total - ${CFG.post.bloomThreshold.toFixed(1)}, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
   col += bloom * (0.05 + uKick * 0.35);
 
-  // Feedback trail — kick makes it linger, no-kick fades fast
+  // Feedback trail — minimal, kicks only
   float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.004 - uImpact * 0.02;
-  vec2 prevUV = crtDistort((vUV - 0.5) * feedbackZoom + 0.5);
-  float kickDecay = ${CFG.post.feedbackDecay.toFixed(2)} - 0.15 * (1.0 - uKick);
-  vec3 prev = texture(uPrev, prevUV).rgb * kickDecay;
-  float kickBlend = 0.08 + uKick * 0.2;
-  col = mix(col, prev, kickBlend);
-
-  // VHS glitch
-  if (uChaos > 0.4) {
-    float strip = step(0.97, fract(sin(floor(uv.y*uRes.y*0.05+uTime*30.0)*43758.5453)));
-    float disp = strip * sin(uTime*100.0) * 0.02 * uChaos;
-    vec3 d;
-    d.r = texture(uScene, uv + vec2(disp+ca, 0)).r;
-    d.g = texture(uScene, uv + vec2(disp, 0)).g;
-    d.b = texture(uScene, uv + vec2(disp-ca, 0)).b;
-    col = mix(col, d.gbr, strip * uChaos * 0.7);
-  }
+  vec2 prevUV = clamp((vUV - 0.5) * feedbackZoom + 0.5, 0.01, 0.99);
+  vec3 prev = samplePrev(prevUV) * 0.5;
+  float edgeFade = smoothstep(0.0, 0.03, min(min(vUV.x, 1.0-vUV.x), min(vUV.y, 1.0-vUV.y)));
+  prev *= edgeFade;
+  col = mix(col, max(prev, col), uKick * 0.08);
 
   // Kick flash
   col += vec3(1.0, 0.3, 0.6) * smoothstep(0.8, 1.0, uKick) * 0.12;
@@ -781,9 +758,9 @@ void main() {
   float grain = hash(uv * uRes + fract(uTime * 100.0)) - 0.5;
   col += grain * (0.03 + uChaos * 0.04);
 
-  // CRT scanlines
+  // CRT scanlines — very subtle
   float scanline = sin(gl_FragCoord.y * 1.5) * 0.5 + 0.5;
-  col *= 0.92 + scanline * 0.08;
+  col *= 0.96 + scanline * 0.04;
 
   // RGB subpixel
   float px = mod(gl_FragCoord.x, 3.0);
@@ -794,17 +771,15 @@ void main() {
   );
   col = mix(col, col * subpx, 0.1);
 
-  // Vignette
+  // Vignette — very subtle
   vec2 vig = vUV * 2.0 - 1.0;
-  float vigF = 1.0 - dot(vig, vig) * ${CFG.post.vignetteStrength.toFixed(2)};
-  vigF *= 1.0 - pow(max(abs(vig.x), abs(vig.y)), 8.0) * 0.3;
-  col *= vigF;
+  float vigF = 1.0 - dot(vig, vig) * 0.12;
+  col *= max(vigF, 0.6);
 
-  // Tone map + saturation
-  col = col / (1.0 + col * ${CFG.post.toneMapCompression.toFixed(2)});
+  // Saturation boost only — no tone compression
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   col = mix(vec3(lum), col, ${CFG.post.saturationBoost.toFixed(2)});
-  col = clamp(col, 0.0, ${CFG.post.maxBrightness.toFixed(2)});
+  col = clamp(col, 0.0, 1.0);
 
   fragColor = vec4(col, 1.0);
 }`;
@@ -877,7 +852,7 @@ function rebuildFBs() {
   const w = glCanvas.width, h = glCanvas.height;
   if (w === screenW && h === screenH) return;
   screenW = w; screenH = h;
-  sceneW = Math.floor(w / 2); sceneH = Math.floor(h / 2);
+  sceneW = Math.floor(w * 0.75); sceneH = Math.floor(h * 0.75);
   for (const o of [sceneFB, ppFB[0], ppFB[1]]) {
     if (o.fb) gl.deleteFramebuffer(o.fb);
     if (o.tex) gl.deleteTexture(o.tex);
@@ -891,6 +866,8 @@ function rebuildFBs() {
 // ─── Audio Engine ───────────────────────────────────────────────────
 let audioCtx = null, analyser = null, sourceNode = null, audioEl = null;
 let isPlaying = false, isPaused = false;
+let volume = 0.8; // 0-1, controlled by scroll wheel
+let volumeShowTimer = 0; // seconds remaining to show volume bar
 let freqData, timeData;
 const bands = { sub: 0, low: 0, mid: 0, high: 0 };
 const prevBands = { sub: 0, low: 0, mid: 0, high: 0 };
@@ -2006,6 +1983,34 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
   }
   ctx.globalAlpha = 1;
 
+  // Volume meter — always visible, energy-reactive
+  {
+    if (volumeShowTimer > 0) volumeShowTimer -= dt;
+    const isActive = volumeShowTimer > 0;
+    const baseAlpha = isActive ? 0.9 : 0.25;
+    const barW = 4, barH = H * 0.25;
+    const barX = W - 20, barY = H * 0.375;
+
+    // Background track
+    ctx.globalAlpha = baseAlpha * 0.3;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(barX, barY, barW, barH);
+
+    // Volume fill
+    ctx.globalAlpha = baseAlpha;
+    const fillH = barH * volume;
+    ctx.fillStyle = `hsl(${hue},80%,60%)`;
+    ctx.fillRect(barX, barY + barH - fillH, barW, fillH);
+
+    // Energy level indicator (thin line)
+    const eLine = barY + barH - barH * energy;
+    ctx.globalAlpha = baseAlpha * 0.6;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(barX - 2, eLine, barW + 4, 1);
+
+    ctx.globalAlpha = 1;
+  }
+
   // Particles
   let aliveCount = 0;
   for (let i = 0; i < CFG.maxParticles; i++) {
@@ -2061,6 +2066,7 @@ function startPlayback(file) {
   audioEl.crossOrigin = 'anonymous';
   audioEl.src = URL.createObjectURL(file);
   audioEl.loop = true;
+  audioEl.volume = volume;
   sourceNode = audioCtx.createMediaElementSource(audioEl);
   sourceNode.connect(analyser);
   if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -2151,6 +2157,13 @@ document.addEventListener('keydown', e => {
     hud.classList.toggle('hidden', !showDebug);
   }
 });
+
+document.addEventListener('wheel', e => {
+  e.preventDefault();
+  volume = Math.max(0, Math.min(1, volume - e.deltaY * 0.001));
+  if (audioEl) audioEl.volume = volume;
+  volumeShowTimer = 2.0; // show bar for 2 seconds
+}, { passive: false });
 
 document.addEventListener('click', e => {
   if (e.target === glCanvas || e.target === ovCanvas) {
@@ -2310,7 +2323,7 @@ function frame(nowMs) {
     sectionFogMul = 0.5;   // clear fog — see deep into space
   } else if (section === 'buildup') {
     sectionSpeedMul = 0.6 + energyHistory.trendDuration * 0.15; // gradually accelerate
-    sectionFogMul = 1.0 + energyHistory.trendDuration * 0.1;    // fog slowly closes in
+    sectionFogMul = 0.8 + energyHistory.trendDuration * 0.05;   // minimal fog increase
   } else if (section === 'drop') {
     sectionSpeedMul = 2.5; // blast forward
     sectionFogMul = 0.7;   // clear for impact
@@ -2326,7 +2339,7 @@ function frame(nowMs) {
   }
 
   // ── Forward camera ──
-  const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed) * evoSmooth.speedMul * sectionSpeedMul;
+  const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed + kick * 4.0) * evoSmooth.speedMul * sectionSpeedMul;
   cameraZ += forwardSpeed * dt;
   if (kickDelta * percGate > 0.015) {
     cameraZ += CFG.camKickImpulse * (section === 'drop' ? 3.0 : 1.0);
@@ -2334,8 +2347,8 @@ function frame(nowMs) {
   cameraSpeed = forwardSpeed;
   // Camera XY drift (must match shader formula)
   const mOff = [(smoothMouseX - 0.5) * 2, (smoothMouseY - 0.5) * 2];
-  const camDriftX = Math.sin(time * 0.23) * 1.5 + Math.cos(time * 0.17) * 1.0;
-  const camDriftY = Math.sin(time * 0.19) * 1.2 + Math.cos(time * 0.31) * 0.8;
+  const camDriftX = 0.0;
+  const camDriftY = 0.0;
 
   // Black hole: you approach it, pass through, new one spawns further ahead
   const bhDist = bhWorldZ - cameraZ;
