@@ -154,8 +154,8 @@ uniform float uBHZ, uBHSize, uFOV;
 uniform vec2 uRes, uCamXY;
 uniform vec3 uShapeA; // x=symmetry, y=spike, z=fracture
 uniform vec3 uShapeB; // x=twist, y=hollow, z=angular
-uniform vec4 uSpawnA[12]; // xyz=world pos, w=type (0=inactive)
-uniform vec4 uSpawnB[12]; // x=scale, y=life(0-1), z=rotSeed, w=unused
+uniform vec4 uSpawnA[14]; // xyz=world pos, w=type (0=inactive)
+uniform vec4 uSpawnB[14]; // x=scale, y=life(0-1), z=rotSeed, w=unused
 
 #define STEPS ${CFG.scene.steps}
 #define MAX_DIST ${CFG.scene.maxDist.toFixed(1)}
@@ -372,6 +372,33 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
     float spoke2 = max(abs(localP.z) - 0.04, abs(localP.y) - 0.04);
     float spokes = max(min(spoke1, spoke2), -(length(localP.xz) - torusR + tubeR));
     d = min(d, max(spokes, length(localP.xz) - torusR - tubeR * 0.5));
+  } else if (stype < 8.5) {
+    // Type 8: Spinning gear — toothed ring
+    localP.xz *= rot2(spinFast * 3.0);
+    float gearR = length(localP.xz);
+    float ring = abs(gearR - 1.2) - 0.15;
+    float angle = atan(localP.z, localP.x);
+    float teeth = abs(gearR - 1.5) - 0.08;
+    teeth = max(teeth, -abs(sin(angle * 12.0)) + 0.5);
+    d = min(ring, teeth);
+    d = max(d, abs(localP.y) - 0.12); // flatten
+    // Center axle
+    float axle = length(localP) - 0.15;
+    d = min(d, axle);
+  } else {
+    // Type 9: Antenna array — central mast + radiating arms
+    float mast = max(abs(localP.x) - 0.06, abs(localP.z) - 0.06);
+    mast = max(mast, abs(localP.y) - 2.0);
+    vec3 armP = localP - vec3(0, 1.5, 0);
+    armP.xz *= rot2(spinSlow * 2.0);
+    float arm1 = max(abs(armP.x) - 1.5, max(abs(armP.y) - 0.04, abs(armP.z) - 0.04));
+    float arm2 = max(abs(armP.z) - 1.5, max(abs(armP.y) - 0.04, abs(armP.x) - 0.04));
+    d = min(mast, min(arm1, arm2));
+    float tip1 = length(armP - vec3(1.5,0,0)) - 0.1;
+    float tip2 = length(armP - vec3(-1.5,0,0)) - 0.1;
+    float tip3 = length(armP - vec3(0,0,1.5)) - 0.1;
+    float tip4 = length(armP - vec3(0,0,-1.5)) - 0.1;
+    d = min(d, min(min(tip1,tip2), min(tip3,tip4)));
   }
 
   d += 0.01 * sin(localP.x*12.0+tw) * sin(localP.y*12.0) * sin(localP.z*12.0) * uEnergy;
@@ -382,7 +409,7 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
 // ── Combined Scene ──
 float sceneSDF(vec3 p) {
   float d = min(tunnelWallSDF(p), attractorSDF(p));
-  for (int i = 0; i < 12; i++) {
+  for (int i = 0; i < 14; i++) {
     d = min(d, spawnSDF(p, uSpawnA[i], uSpawnB[i]));
   }
   return d;
@@ -445,10 +472,11 @@ void main() {
 
   // Monochrome palette
   vec3 fogCol = vec3(0.01);
-  vec3 kickCol = vec3(1.0, 0.97, 0.93);
-  vec3 hatCol = vec3(0.7, 0.75, 0.8);
-  vec3 snareCol = vec3(0.5, 0.52, 0.55);
-  vec3 bhCol = mix(vec3(1.0), vec3(0.8, 0.85, 1.0), uKick);
+  // Monochrome → red warmth as energy builds
+  vec3 kickCol = vec3(1.0, 0.97 - uEnergy*0.15, 0.93 - uEnergy*0.25);
+  vec3 hatCol = vec3(0.7, 0.73 - uEnergy*0.1, 0.78 - uEnergy*0.15);
+  vec3 snareCol = vec3(0.5, 0.50, 0.53 - uEnergy*0.1);
+  vec3 bhCol = mix(vec3(1.0, 0.95 - uEnergy*0.2, 0.9 - uEnergy*0.3), vec3(1.0, 0.3, 0.15), uKick * uEnergy * 2.0);
 
   vec3 col = fogCol;
 
@@ -459,7 +487,7 @@ void main() {
 
     int hitSpawn = -1;
     float dSpawn = 999.0;
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < 14; i++) {
       float ds = spawnSDF(p, uSpawnA[i], uSpawnB[i]);
       if (ds < dSpawn) { dSpawn = ds; hitSpawn = i; }
     }
@@ -491,8 +519,14 @@ void main() {
         surfCol = hatCol * (0.2 + uEnergy * 0.2 + uKick * 0.3);
       } else if (spawnType < 6.5) {
         surfCol = snareCol * (0.6 + uKick * 1.5 + uHat * 1.5);
-      } else {
+      } else if (spawnType < 7.5) {
         surfCol = vec3(0.8, 0.85, 0.9) * (0.5 + uKick * 2.5);
+      } else if (spawnType < 8.5) {
+        // Gear — bright metallic, spins fast
+        surfCol = kickCol * (0.7 + uKick * 1.5 + uChaos * 0.5);
+      } else {
+        // Antenna — cold technical gray
+        surfCol = hatCol * (0.4 + uEnergy * 0.3 + uKick * 0.5);
       }
     } else {
       surfCol = mix(snareCol, kickCol, uKick * 0.5);
@@ -560,7 +594,7 @@ void main() {
 
   // Chromatic aberration — asymmetric R on hard impact (ULTRAKILL)
   float caStr = 0.002 + uImpact * 0.012 + uKick * 0.005;
-  float caR = caStr * (1.0 + smoothstep(0.15, 0.5, uImpact) * 2.5);
+  float caR = caStr * (1.0 + smoothstep(0.1, 0.4, uImpact) * 3.5);
   vec2 caDir = uv - 0.5;
   vec3 col;
   col.r = sampleScene(uv + caDir * caR).r;
@@ -598,8 +632,8 @@ void main() {
   col = mix(col, max(prev, col), uKick * 0.08);
 
   // Kick flash — white, ULTRAKILL red on hardest
-  vec3 flashCol = mix(vec3(1.0), vec3(1.0, 0.15, 0.1), smoothstep(0.25, 0.4, uKick));
-  col += flashCol * smoothstep(0.2, 0.4, uKick) * 0.2;
+  vec3 flashCol = mix(vec3(1.0), vec3(1.0, 0.1, 0.05), smoothstep(0.15, 0.35, uKick));
+  col += flashCol * smoothstep(0.12, 0.35, uKick) * 0.3;
 
   // BH pass-through flash — red bleed at peak
   if (uFlash > 0.01) {
@@ -626,6 +660,11 @@ void main() {
   vec2 vig = vUV * 2.0 - 1.0;
   float vigF = 1.0 - dot(vig, vig) * 0.12;
   col *= max(vigF, 0.6);
+
+  // Red edge bleed — grows with energy, strongest at screen edges
+  float redVig = dot(vig, vig) * uEnergy * 1.5;
+  col.g -= redVig * 0.12;
+  col.b -= redVig * 0.18;
 
   col = clamp(col, 0.0, 1.0);
 
@@ -670,8 +709,8 @@ const sceneU = getUniforms(sceneProg, [
   'uTime','uEnergy','uKick','uSnare','uHat','uChaos','uRes','uFOV',
   'uShapeA','uShapeB','uCamZ','uFogDensity','uRepPeriod','uObjScale',
   'uCamXY','uCorridorR','uBHZ','uBHSize',
-  'uSpawnA[0]','uSpawnA[1]','uSpawnA[2]','uSpawnA[3]','uSpawnA[4]','uSpawnA[5]','uSpawnA[6]','uSpawnA[7]','uSpawnA[8]','uSpawnA[9]','uSpawnA[10]','uSpawnA[11]',
-  'uSpawnB[0]','uSpawnB[1]','uSpawnB[2]','uSpawnB[3]','uSpawnB[4]','uSpawnB[5]','uSpawnB[6]','uSpawnB[7]','uSpawnB[8]','uSpawnB[9]','uSpawnB[10]','uSpawnB[11]',
+  'uSpawnA[0]','uSpawnA[1]','uSpawnA[2]','uSpawnA[3]','uSpawnA[4]','uSpawnA[5]','uSpawnA[6]','uSpawnA[7]','uSpawnA[8]','uSpawnA[9]','uSpawnA[10]','uSpawnA[11]','uSpawnA[12]','uSpawnA[13]',
+  'uSpawnB[0]','uSpawnB[1]','uSpawnB[2]','uSpawnB[3]','uSpawnB[4]','uSpawnB[5]','uSpawnB[6]','uSpawnB[7]','uSpawnB[8]','uSpawnB[9]','uSpawnB[10]','uSpawnB[11]','uSpawnB[12]','uSpawnB[13]',
 ]);
 const postU = getUniforms(postProg, [
   'uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes','uCamSpeed','uImpact','uFlash'
@@ -1597,7 +1636,7 @@ const shapeParams = {
 };
 
 // ─── Spawn Pool ────────────────────────────────────────────────────
-const POOL_SIZE = 12;
+const POOL_SIZE = 14;
 const spawnPool = Array.from({length: POOL_SIZE}, () => ({
   active: false, type: 0,
   x: 0, y: 0, z: 0,
@@ -1622,7 +1661,7 @@ function spawnObject(type, zAhead, xyRadius, scale, maxLife) {
   s.x = shakeX + Math.cos(angle) * xyRadius;
   s.y = shakeY + Math.sin(angle) * xyRadius;
   s.z = cameraZ + zAhead;
-  s.scale = scale;
+  s.scale = scale * 0.7;
   s.maxLife = maxLife;
   s.age = 0;
   s.life = 0;
@@ -1643,6 +1682,68 @@ let styleFlash = 0;
 let styleShake = 0;
 let styleSustainTime = 0;
 let smoothStyleEnergy = 0;
+let prevStyleRank = 0; // for rank change detection
+
+// ── ULTRAKILL Tech Text System ──
+const TECH_TEXTS = [
+  '#INCLUDE <breakcore.h>', '#INCLUDE <permutation.transmutation.annihilation>',
+  'SYSTEM V1 INITIALIZED', 'DIAGNOSTICS_OK', 'STANDBY — WAIT FOR WAKE',
+  'float energy = ${e};', 'vec3 col = vec3(${k});', 'uniform float uKick;',
+  'EARLY_ACCESS READY', '0x${hex}', 'SECTOR_OVERWRITTEN',
+  'SIGNAL LOST', 'RECONSTRUCTING...', 'STYLE: ${style}',
+  'KILL_COUNT++', 'PRESSURE: ${bp}', 'DAMAGE: ${dmg}',
+  'WARNING: THRESHOLD EXCEEDED', 'MEMORY_LEAK DETECTED',
+  'for(int i=0;i<INFINITY;i++)', 'return chaos;',
+  '// TODO: fix reality', 'assert(alive);',
+  'VELOCITY: ${spd}', 'DEPTH: ${z}', 'CHAOS: ${chaos}',
+  '#define BREAKCORE 1', 'pragma once', 'void main() {',
+  'gl_FragColor = blood;', 'if(dead) respawn();',
+];
+const techTextPool = [];
+const MAX_TECH_TEXTS = 14;
+let techTextCooldown = 0;
+
+function spawnTechText(energy, kick, side) {
+  if (techTextPool.length >= MAX_TECH_TEXTS) {
+    // Remove oldest
+    techTextPool.shift();
+  }
+  const W = window.innerWidth, H = window.innerHeight;
+  side = side || ['left','right','top'][Math.floor(Math.random() * 3)];
+  let x, y, align;
+  if (side === 'left') {
+    x = 10 + Math.random() * W * 0.12;
+    y = 30 + Math.random() * H * 0.85;
+    align = 'left';
+  } else if (side === 'right') {
+    x = W - 10 - Math.random() * W * 0.12;
+    y = 30 + Math.random() * H * 0.85;
+    align = 'right';
+  } else {
+    x = W * 0.1 + Math.random() * W * 0.8;
+    y = 10 + Math.random() * H * 0.12;
+    align = 'center';
+  }
+  const template = TECH_TEXTS[Math.floor(Math.random() * TECH_TEXTS.length)];
+  techTextPool.push({
+    template, x, y, align, side,
+    age: 0, maxLife: 2 + Math.random() * 3,
+    fontSize: 10 + Math.floor(Math.random() * 7),
+  });
+}
+
+function resolveTechText(template, energy, kick, chaos, speed, z) {
+  return template
+    .replace('${e}', energy.toFixed(3))
+    .replace('${k}', kick.toFixed(2))
+    .replace('${style}', STYLE_RANKS[styleRank].label)
+    .replace('${spd}', speed.toFixed(1))
+    .replace('${z}', z.toFixed(0))
+    .replace('${chaos}', chaos.toFixed(2))
+    .replace('${hex}', Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0'))
+    .replace('${bp}', (80 + energy * 120).toFixed(0))
+    .replace('${dmg}', (kick * 999).toFixed(0));
+}
 
 // ── Telemetry recorder ──
 const telemetryLog = [];
@@ -1740,6 +1841,33 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
   ctx.clearRect(0, 0, W, H);
   overlayTime += dt;
   const cx = W / 2, cy = H / 2;
+  const isUK = styleRank >= 5;
+  const isBK = styleRank >= 4;
+
+  // ── Corner Brackets (technical viewfinder) ──
+  if (isPlaying) {
+    const bracketLen = 35 + energy * 15;
+    const bracketInset = 12;
+    const bracketAlpha = 0.2 + energy * 0.5 + kick * 0.3;
+    ctx.strokeStyle = isUK ? `rgba(255,60,40,${bracketAlpha.toFixed(2)})` : `rgba(180,185,190,${bracketAlpha.toFixed(2)})`;
+    ctx.lineWidth = 1.5;
+    // Top-left
+    ctx.beginPath();
+    ctx.moveTo(bracketInset, bracketInset + bracketLen); ctx.lineTo(bracketInset, bracketInset); ctx.lineTo(bracketInset + bracketLen, bracketInset);
+    ctx.stroke();
+    // Top-right
+    ctx.beginPath();
+    ctx.moveTo(W - bracketInset - bracketLen, bracketInset); ctx.lineTo(W - bracketInset, bracketInset); ctx.lineTo(W - bracketInset, bracketInset + bracketLen);
+    ctx.stroke();
+    // Bottom-left
+    ctx.beginPath();
+    ctx.moveTo(bracketInset, H - bracketInset - bracketLen); ctx.lineTo(bracketInset, H - bracketInset); ctx.lineTo(bracketInset + bracketLen, H - bracketInset);
+    ctx.stroke();
+    // Bottom-right
+    ctx.beginPath();
+    ctx.moveTo(W - bracketInset - bracketLen, H - bracketInset); ctx.lineTo(W - bracketInset, H - bracketInset); ctx.lineTo(W - bracketInset, H - bracketInset - bracketLen);
+    ctx.stroke();
+  }
 
   // Vanishing point — fixed at center
   const vpX = cx;
@@ -1809,17 +1937,26 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
   ctx.globalAlpha = 1;
 
   if (isPlaying && freqData) {
-    // Side Frequency Bars — subtle peripheral accent
-    const barH = H * 0.5;
-    const startY = H * 0.25;
+    // Side Frequency Bars — enhanced peripheral accent
+    const barH = H * 0.7;
+    const startY = H * 0.15;
     for (let i = 0; i < CFG.numBars; i++) {
       const v = smoothBars[i];
       const yPos = startY + i * (barH / CFG.numBars);
-      const barLen = v * W * 0.10;
-      const lit = Math.floor(80 + v * 120);
-      ctx.fillStyle = `rgba(${lit},${lit + 5},${lit + 10},${0.25 + v * 0.3})`;
-      ctx.fillRect(0, yPos, barLen, Math.max(1, barH / CFG.numBars - 2));
-      ctx.fillRect(W - barLen, yPos, barLen, Math.max(1, barH / CFG.numBars - 2));
+      const barLen = v * W * 0.12;
+      const bW = Math.max(2, barH / CFG.numBars - 1);
+      const lit = Math.floor(80 + v * 130);
+      const bR = isBK ? Math.min(255, lit + 80) : lit;
+      const bG = isBK ? Math.floor(lit * 0.5) : lit + 5;
+      const bB = isBK ? Math.floor(lit * 0.3) : lit + 10;
+      ctx.fillStyle = `rgba(${bR},${bG},${bB},${0.3 + v * 0.4})`;
+      ctx.fillRect(0, yPos, barLen, bW);
+      ctx.fillRect(W - barLen, yPos, barLen, bW);
+      // Tick marks at bar ends
+      if (v > 0.3) {
+        ctx.fillRect(barLen, yPos, 2, bW);
+        ctx.fillRect(W - barLen - 2, yPos, 2, bW);
+      }
     }
 
     // ── Outer Spectrum Ring — breathes with KICK, not general energy ──
@@ -1838,7 +1975,10 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       const outerSpike = ringR + v * ringR * 0.5;
       const innerSpike = ringR - v * ringR * 0.2;
       const rLit = Math.floor(120 + v * 135);
-      ctx.strokeStyle = `rgba(${rLit},${rLit + 3},${rLit + 5},${0.35 + v * 0.4})`;
+      const rR = isBK ? 255 : rLit;
+      const rG = isBK ? Math.floor(rLit * 0.6) : rLit + 3;
+      const rB = isBK ? Math.floor(rLit * 0.4) : rLit + 5;
+      ctx.strokeStyle = `rgba(${rR},${rG},${rB},${0.35 + v * 0.4})`;
       ctx.beginPath();
       ctx.moveTo(ringCX + Math.cos(angle) * innerSpike, ringCY + Math.sin(angle) * innerSpike);
       ctx.lineTo(ringCX + Math.cos(angle) * outerSpike, ringCY + Math.sin(angle) * outerSpike);
@@ -1886,7 +2026,7 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       ring.life -= dt;
       if (ring.life <= 0) { shockRings.splice(i, 1); continue; }
       ctx.globalAlpha = ring.life * 0.4;
-      ctx.strokeStyle = `rgba(200,205,210,1)`;
+      ctx.strokeStyle = isUK ? `rgba(255,60,40,1)` : isBK ? `rgba(255,210,200,1)` : `rgba(200,205,210,1)`;
       ctx.lineWidth = 2 + ring.life * 3;
       ctx.beginPath(); ctx.arc(vpX, vpY, ring.r, 0, Math.PI * 2); ctx.stroke();
     }
@@ -1927,7 +2067,7 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     if (Math.random() < 0.3) continue;
 
     ctx.globalAlpha = alpha * 0.8;
-    ctx.fillStyle = `rgba(220,225,230,1)`;
+    ctx.fillStyle = isUK ? `rgba(255,40,30,1)` : isBK ? `rgba(255,200,190,1)` : `rgba(220,225,230,1)`;
     if (t.jagged) {
       for (let s = 0; s < 5; s++) {
         const segY = t.y - t.h/2 + s * (t.h/5);
@@ -1993,26 +2133,88 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
   }
   ctx.globalAlpha = 1;
 
+  // ── ULTRAKILL Tech Text ──
+  if (isPlaying) {
+    // Update existing texts
+    for (let i = techTextPool.length - 1; i >= 0; i--) {
+      techTextPool[i].age += dt;
+      if (techTextPool[i].age >= techTextPool[i].maxLife) { techTextPool.splice(i, 1); continue; }
+      const t = techTextPool[i];
+      const life = t.age / t.maxLife;
+      const fadeIn = Math.min(1, t.age / 0.3);
+      const fadeOut = Math.min(1, (t.maxLife - t.age) / 0.5);
+      const alpha = fadeIn * fadeOut * (0.4 + energy * 0.4);
+      const text = resolveTechText(t.template, energy, kick, chaosMetric, cameraSpeed, cameraZ);
+      ctx.font = `${t.fontSize}px 'Courier New', monospace`;
+      ctx.textAlign = t.align;
+      const isUK = styleRank >= 5;
+      const isBK = styleRank >= 4;
+      ctx.fillStyle = isUK ? `rgba(255,60,40,${alpha.toFixed(2)})` : isBK ? `rgba(255,220,210,${alpha.toFixed(2)})` : `rgba(140,145,150,${alpha.toFixed(2)})`;
+      ctx.globalAlpha = alpha;
+      ctx.fillText(text, t.x, t.y);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'start';
+    // Spawn new texts
+    techTextCooldown -= dt;
+    if (techTextCooldown <= 0) {
+      techTextCooldown = 1.5 + Math.random() * 2.0 - energy * 3.0; // faster at high energy
+      techTextCooldown = Math.max(0.3, techTextCooldown);
+      spawnTechText(energy, kick);
+    }
+  }
+
+  // ── Edge Warning Strips (ULTRAKILL rank) ──
+  if (isPlaying && isUK) {
+    const stripH = 3;
+    const segW = 12;
+    const scroll = (overlayTime * 80) % (segW * 2);
+    ctx.globalAlpha = 0.4 + kick * 0.4;
+    for (let x = -segW * 2; x < W + segW; x += segW * 2) {
+      ctx.fillStyle = 'rgba(255,40,30,1)';
+      ctx.fillRect(x + scroll, 0, segW, stripH);
+      ctx.fillRect(x + scroll, H - stripH, segW, stripH);
+      ctx.fillStyle = 'rgba(40,0,0,1)';
+      ctx.fillRect(x + scroll + segW, 0, segW, stripH);
+      ctx.fillRect(x + scroll + segW, H - stripH, segW, stripH);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ── Rank-up screen flash ──
+  if (styleFlash > 0.5) {
+    const rank = STYLE_RANKS[styleRank];
+    ctx.globalAlpha = (styleFlash - 0.5) * 0.15;
+    ctx.fillStyle = rank.color + '1)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
   // ── Style Meter ──
   if (isPlaying) {
     const rank = STYLE_RANKS[styleRank];
     const meterX = W * 0.5 + styleShake * 8;
     const meterY = H - 60;
-    const fontSize = 48 + styleFlash * 16;
+    const ukPulse = isUK ? 1.0 + Math.sin(overlayTime * 25) * 0.08 : 1.0;
+    const fontSize = (48 + styleFlash * 20) * ukPulse;
     ctx.font = `bold ${Math.floor(fontSize)}px 'Courier New', monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Glow behind text
-    const glowAlpha = 0.3 + styleFlash * 0.5;
-    ctx.globalAlpha = glowAlpha;
-    ctx.fillStyle = rank.color + '0.4)';
-    ctx.fillText(rank.label, meterX, meterY);
+    // Glow behind text — bigger at ULTRAKILL
+    const glowSize = isUK ? 3 : 1;
+    const glowAlpha = (isUK ? 0.5 : 0.3) + styleFlash * 0.5;
+    ctx.globalAlpha = glowAlpha * 0.3;
+    ctx.fillStyle = rank.color + '0.5)';
+    for (let g = 0; g < glowSize; g++) {
+      ctx.fillText(rank.label, meterX + (Math.random()-0.5)*2, meterY + (Math.random()-0.5)*2);
+    }
 
     // Main text
-    ctx.globalAlpha = 0.7 + styleFlash * 0.3;
+    ctx.globalAlpha = 0.8 + styleFlash * 0.2;
     ctx.fillStyle = rank.color + '1)';
-    ctx.fillText(rank.label, meterX, meterY);
+    const displayLabel = isUK ? '>> ' + rank.label + ' <<' : rank.label;
+    ctx.fillText(displayLabel, meterX, meterY);
 
     ctx.globalAlpha = 1;
     ctx.textAlign = 'start';
@@ -2297,11 +2499,14 @@ function frame(nowMs) {
   // Style meter shake
   if (kickDelta * percGate > 0.005) {
     styleShake += (Math.random() - 0.5) * kick * 8;
+    // Kick-triggered tech text
+    if (kick > 0.15 && Math.random() < 0.3) spawnTechText(energy, kick);
   }
   styleShake *= 0.85;
 
-  // ULTRAKILL red particles at peak energy
-  if (energy > 0.25 && Math.random() < 0.05) {
+  // ULTRAKILL red particles — rate scales with rank
+  const redRate = styleRank >= 5 ? 0.3 : styleRank >= 4 ? 0.15 : 0.05;
+  if (energy > 0.15 && Math.random() < redRate) {
     const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
     const a = Math.random() * Math.PI * 2;
     spawnOne(cx + Math.cos(a)*10, cy + Math.sin(a)*10, Math.cos(a)*400, Math.sin(a)*400, -1, 6, 0.8, 300);
@@ -2373,7 +2578,9 @@ function frame(nowMs) {
   }
   if (chaos > 0.3 && spawnCooldowns.hat <= 0) {
     spawnCooldowns.hat = 0.8;
-    if (Math.random() < 0.5) spawnObject(7, 8 + Math.random()*12, 2.5, 1.0, 3 + Math.random()*3);
+    const r = Math.random();
+    if (r < 0.35) spawnObject(7, 8 + Math.random()*12, 2.5, 1.0, 3 + Math.random()*3);
+    else if (r < 0.65) spawnObject(8, 6 + Math.random()*10, 1.5, 0.8, 3 + Math.random()*3); // gear
     else spawnObject(1, 10 + Math.random()*15, 2.0, 0.6, 4 + Math.random()*4);
   }
   if (section === 'drop' && energyHistory.prevSection !== 'drop' && spawnCooldowns.drop <= 0) {
@@ -2396,13 +2603,15 @@ function frame(nowMs) {
   // Ambient spawning — scene is never empty
   if (spawnCooldowns.ambient <= 0) {
     const activeCount = spawnPool.filter(s => s.active).length;
-    if (activeCount < 4) {
-      spawnCooldowns.ambient = 1.5 + Math.random();
+    if (activeCount < 5) {
+      spawnCooldowns.ambient = 1.2 + Math.random() * 0.8;
       const r = Math.random();
-      if (r < 0.3) spawnObject(5, 25 + Math.random()*25, 4.0, 1.5 + Math.random(), 10 + Math.random()*10); // distant monolith
-      else if (r < 0.6) spawnObject(7, 10 + Math.random()*15, 2.5, 1.0, 4 + Math.random()*4); // energy ring
-      else if (r < 0.85) spawnObject(2, 8 + Math.random()*12, 1.5, 0.6, 3 + Math.random()*3); // cross blade
-      else spawnObject(4, 15 + Math.random()*15, 3.0, 1.5, 5 + Math.random()*5); // void frame
+      if (r < 0.2) spawnObject(5, 25 + Math.random()*25, 4.0, 1.5 + Math.random(), 10 + Math.random()*10); // monolith
+      else if (r < 0.35) spawnObject(7, 10 + Math.random()*15, 2.5, 1.0, 4 + Math.random()*4); // energy ring
+      else if (r < 0.5) spawnObject(2, 8 + Math.random()*12, 1.5, 0.6, 3 + Math.random()*3); // cross blade
+      else if (r < 0.65) spawnObject(4, 15 + Math.random()*15, 3.0, 1.5, 5 + Math.random()*5); // void frame
+      else if (r < 0.8) spawnObject(8, 8 + Math.random()*12, 2.0, 0.8, 4 + Math.random()*3); // gear
+      else spawnObject(9, 20 + Math.random()*20, 3.0, 1.2, 8 + Math.random()*6); // antenna
     }
   }
 
@@ -2466,6 +2675,8 @@ function frame(nowMs) {
     hitlagFrames = 6; // BH pass hitlag
     bhPassFlash = 1.0;
     bhWorldZ = cameraZ + 50.0 + Math.random() * 40.0;
+    // BH pass tech text burst
+    for (let i = 0; i < 4; i++) spawnTechText(1, 1);
     // Post-pass rebuild sequence
     rebuildQueue.length = 0;
     rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 5, xyR: 1.5, scale: 1.5, maxLife: 3 });
@@ -2492,8 +2703,11 @@ function frame(nowMs) {
   }
   if (newRank > styleRank) {
     styleFlash = 1.0;
+    prevStyleRank = styleRank;
     styleRank = newRank;
     styleSustainTime = 0;
+    // Rank-up tech text burst
+    for (let i = 0; i < 3; i++) spawnTechText(energy, kick);
   } else if (newRank < styleRank) {
     styleSustainTime += dt;
     if (styleSustainTime > 2.5) { styleRank = Math.max(newRank, styleRank - 1); styleSustainTime = 0; }
