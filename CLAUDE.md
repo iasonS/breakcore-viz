@@ -53,3 +53,4 @@ bash deploy.sh
 ## Dev
 
 Open `static/index.html` directly in browser for local testing. Add `?debug` for HUD overlay. Add `?demo` for synthetic audio mode (no file needed).
+# test
