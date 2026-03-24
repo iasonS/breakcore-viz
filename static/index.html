@@ -19,6 +19,9 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 #drop-zone div{color:#0f0;font:24px 'Courier New',monospace;border:2px dashed rgba(0,255,0,.4);
   padding:60px 80px;text-align:center}
 #drop-zone div small{display:block;margin-top:8px;font-size:13px;color:rgba(0,255,0,.5)}
+#drop-inner{text-align:left;font-size:14px;line-height:1.6}
+.boot-cursor{animation:blink .5s step-end infinite}
+@keyframes blink{50%{opacity:0}}
 .mode-btn{font:18px 'Courier New',monospace;color:#0f0;background:rgba(0,255,0,.08);
   border:1px solid rgba(0,255,0,.4);padding:14px 32px;cursor:pointer;margin:8px;
   transition:all .2s;position:relative;overflow:hidden}
@@ -39,6 +42,7 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 #analyze-overlay .bar-fill{height:100%;background:#0f0;width:0%;transition:width .15s}
 #analyze-overlay .status{margin-top:10px;font-size:12px;color:rgba(0,255,0,.6)}
 </style>
+<script src="https://unpkg.com/sam-js@0.3.1"></script>
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -51,7 +55,44 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
   <div id="hud-band">K:0 S:0 H:0</div>
   <div id="hud-extra">P: 0</div>
 </div>
-<div id="drop-zone"><div>DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small></div></div>
+<div id="drop-zone"><div id="drop-inner"></div></div>
+<script>
+(function() {
+  const bootLines = [
+    'BOOT UP SEQUENCE... READY',
+    'FIRMWARE: V1.0.0',
+    'CALIBRATION: COMPLETE',
+    'AUDIO: OK',
+    'VIDEO: OK',
+    'MECHANICS: OK',
+    'ALL SYSTEMS OPERATIONAL',
+    '',
+    'MACHINE ID: V1',
+    'LOCATION: APPROACHING HELL',
+    '',
+  ];
+  const finalLine = 'MANKIND IS DEAD. BLOOD IS FUEL. HELL IS FULL.';
+  const dropInner = document.getElementById('drop-inner');
+  let html = '';
+  let lineIdx = 0;
+  function addLine() {
+    if (lineIdx < bootLines.length) {
+      const line = bootLines[lineIdx];
+      html += (line ? line : '&nbsp;') + '<br>';
+      dropInner.innerHTML = html + '<span class="boot-cursor">_</span>';
+      lineIdx++;
+      setTimeout(addLine, 80 + Math.random() * 60);
+    } else {
+      // Final line in red
+      html += '<span style="color:#ff3c28;font-weight:bold">' + finalLine + '</span><br><br>';
+      html += 'DROP AUDIO HERE<br>';
+      html += '<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small>';
+      dropInner.innerHTML = html;
+    }
+  }
+  setTimeout(addLine, 400);
+})();
+</script>
 <div id="analyze-overlay" class="hidden">
   <div class="inner">
     <div id="analyze-label">ANALYZING AUDIO...</div>
@@ -73,12 +114,12 @@ const CFG = {
   bandMultipliers: { kick: 3, snare: 2.5, hat: 4 },
 
   // Particles
-  maxParticles: 1200,
+  maxParticles: 2000,
   spawn: {
-    kick:  { count: [40, 70], speed: [250, 700], size: [5, 11], life: [0.8, 1.5], gravity: 500 },
-    snare: { count: [30, 50], speed: [300, 750], size: [3, 6], life: [0.4, 0.8], gravity: 250 },
-    hat:   { count: [35, 55], speed: [400, 950], size: [2, 4], life: [0.2, 0.5], gravity: 0 },
-    peak:  { count: [60, 100], speed: [350, 1000], size: [4, 9], life: [0.6, 1.3], gravity: 350 },
+    kick:  { count: [80, 140], speed: [250, 700], size: [5, 11], life: [0.8, 1.5], gravity: 500 },
+    snare: { count: [60, 100], speed: [300, 750], size: [3, 6], life: [0.4, 0.8], gravity: 250 },
+    hat:   { count: [70, 110], speed: [400, 950], size: [2, 4], life: [0.2, 0.5], gravity: 0 },
+    peak:  { count: [120, 200], speed: [350, 1000], size: [4, 9], life: [0.6, 1.3], gravity: 350 },
   },
   onsetThresholds: { kick: 0.015, snare: 0.012, hat: 0.008, peak: 0.03 },
   peakEnergyMin: 0.6,
@@ -86,40 +127,23 @@ const CFG = {
   // Overlay
   numBars: 64,
   numStars: 400,
-  maxRings: 12,
+  maxRings: 16,
   maxTears: 30,
-  // Visual evolution
-  phaseDuration: 6,    // seconds per evolution phase — breakcore doesn't linger
-  shapeDuration: 8,    // seconds per shape before morphing
-  morphDuration: 1.5,  // seconds to morph between shapes — fast cuts
-  numShapes: 4,        // protein, crystal, jellyfish, blackhole
-
   // Forward camera
   camBaseSpeed: 6.0,
   camBoostSpeed: 12.0,
   camKickImpulse: 1.2,
-  corridorRadius: 2.5, // tunnel wall minimum radius from camera path — tight for flyby intensity
+  corridorRadius: 2.5,
 
   // Shader tuning
   scene: {
-    steps: 28, maxDist: 30.0, surfThreshold: 0.022,
+    steps: 44, maxDist: 30.0, surfThreshold: 0.022,
   },
   post: {
     bloomThreshold: 0.5, bloomIntensity: 1.2, bloomKickBoost: 0.25,
     feedbackBaseZoom: 0.98, feedbackDecay: 0.82, feedbackBlend: 0.2,
-    vignetteStrength: 0.3, toneMapCompression: 0.2, saturationBoost: 1.35,
-    maxBrightness: 1.0,
+    vignetteStrength: 0.3,
   },
-
-  // Evolution phases — each defines a distinct "place"
-  evoPhases: [
-    { repPeriod: 5.0, fogDensity: 0.03, speedMul: 1.2, tunnelBlend: 0.0, objScale: 0.9, colorGrade: 0 },
-    { repPeriod: 3.5, fogDensity: 0.04, speedMul: 1.6, tunnelBlend: 0.0, objScale: 0.8, colorGrade: 1 },
-    { repPeriod: 6.0, fogDensity: 0.025, speedMul: 0.9, tunnelBlend: 0.0, objScale: 1.1, colorGrade: 2 },
-    { repPeriod: 4.0, fogDensity: 0.035, speedMul: 1.5, tunnelBlend: 0.4, objScale: 0.85, colorGrade: 3 },
-    { repPeriod: 3.0, fogDensity: 0.045, speedMul: 2.2, tunnelBlend: 0.6, objScale: 0.7, colorGrade: 0 },
-    { repPeriod: 7.0, fogDensity: 0.02, speedMul: 0.7, tunnelBlend: 0.0, objScale: 1.2, colorGrade: 2 },
-  ],
 
   // HUD
   debugMode: new URLSearchParams(window.location.search).has('debug'),
@@ -165,22 +189,19 @@ precision highp float;
 in vec2 vUV;
 out vec4 fragColor;
 
-uniform float uTime, uEnergy, uKick, uSnare, uHat, uChaos, uHue, uMorph;
-uniform float uCamZ, uTunnelBlend, uFogDensity, uRepPeriod, uObjScale, uCorridorR;
-uniform float uBHZ, uBHSize;
-uniform int uShapeA, uShapeB;
-uniform vec2 uRes, uMouse, uCamXY;
+uniform float uTime, uEnergy, uKick, uSnare, uHat, uChaos;
+uniform float uCamZ, uFogDensity, uRepPeriod, uObjScale, uCorridorR;
+uniform float uBHZ, uBHSize, uFOV;
+uniform vec2 uRes, uCamXY;
+uniform vec3 uShapeA; // x=symmetry, y=spike, z=fracture
+uniform vec3 uShapeB; // x=twist, y=hollow, z=angular
+uniform vec4 uSpawnA[14]; // xyz=world pos, w=type (0=inactive)
+uniform vec4 uSpawnB[14]; // x=scale, y=life(0-1), z=rotSeed, w=unused
 
 #define STEPS ${CFG.scene.steps}
 #define MAX_DIST ${CFG.scene.maxDist.toFixed(1)}
 #define SURF ${CFG.scene.surfThreshold.toFixed(3)}
 
-vec3 hsl(float h, float s, float l) {
-  vec3 c = clamp(abs(mod(h*6.0+vec3(0,4,2),6.0)-3.0)-1.0,0.0,1.0);
-  return l+s*(c-0.5)*(1.0-abs(2.0*l-1.0));
-}
-
-// ── Hashing ──
 vec3 hash31(vec3 p) {
   p = mod(p, 256.0);
   p = fract(p * vec3(443.897, 397.297, 491.187));
@@ -190,95 +211,62 @@ vec3 hash31(vec3 p) {
 
 mat2 rot2(float a) { float c=cos(a),s=sin(a); return mat2(c,s,-s,c); }
 
-// ── Shape SDFs ──
-float torusSDF(vec3 p, float tw) {
-  p.x += sin(p.y*3.0+tw)*0.2*uEnergy;
-  p.y += sin(p.z*2.5+tw)*0.15*uEnergy;
-  float r = length(p.xy) - 1.2;
-  float y2 = p.z - 0.5*sin(atan(p.y,p.x)*5.0+tw);
-  float d = sqrt(r*r+y2*y2) - 0.45;
-  d += 0.05*sin(p.x*12.0+tw)*sin(p.y*12.0)*sin(p.z*12.0)*uEnergy;
-  d += 0.03*sin(p.x*25.0)*sin(p.y*25.0)*sin(p.z*25.0)*uChaos;
-  return d;
-}
+// ── Generative Parametric SDF ──
+float generativeSDF(vec3 p, float tw) {
+  float twistRate = uShapeB.x * 2.0;
+  p.xz *= rot2(p.y * twistRate + tw * 0.2);
 
-float crystalSDF(vec3 p, float tw) {
-  p.xz *= rot2(tw*0.3);
-  p.xy *= rot2(tw*0.2);
-  float d = (abs(p.x)+abs(p.y*1.5)+abs(p.z)-1.3)*0.5;
-  vec3 q = p; q.xz *= rot2(0.785);
-  float s2 = (abs(q.x*1.3)+abs(q.y)+abs(q.z*1.3)-1.0)*0.5;
-  vec3 r = p; r.yz *= rot2(0.785);
-  float s3 = (abs(r.x)+abs(r.y*1.4)+abs(r.z)-0.9)*0.5;
-  d = min(d, min(s2, s3));
-  d += 0.04*sin(p.x*15.0+tw*2.0)*sin(p.y*15.0+tw)*sin(p.z*15.0)*uEnergy;
-  d += 0.03*sin(p.x*25.0)*sin(p.z*25.0)*uChaos;
-  return d;
-}
+  float n = max(3.0, floor(uShapeA.x + 0.5));
+  float sector = 6.283 / n;
+  float angle = atan(p.z, p.x);
+  angle = mod(angle + sector * 0.5, sector) - sector * 0.5;
+  float rxz = length(p.xz);
+  p = vec3(cos(angle) * rxz, p.y, sin(angle) * rxz);
 
-float jellyfishSDF(vec3 p, float tw) {
-  p.y += 0.3+sin(tw*0.4)*0.3;
-  p.xz *= rot2(tw*0.15);
-  float breathe = 1.0+sin(tw)*0.1*(1.0+uKick);
-  float dome = length(p*vec3(1.0,1.3,1.0))/breathe - 1.1;
-  dome = max(dome, p.y-0.2);
-  dome += 0.06*sin(atan(p.z,p.x)*8.0+tw)*sin(p.y*5.0)*uKick;
-  float ty = p.y+0.3;
-  if(ty<0.0) {
-    for(int i=0; i<5; i++) {
-      float a = float(i)*1.2566+tw*0.25;
-      vec2 tc = vec2(cos(a),sin(a))*0.4;
-      float td = length(p.xz-tc);
-      float w = sin(ty*6.0-tw*1.5+float(i))*0.12;
-      dome = min(dome, td-(0.08+w)*exp(ty*0.6));
-    }
+  float sphere = length(p) - 1.0;
+  vec3 ap = abs(p);
+  float octa = (ap.x + ap.y + ap.z - 1.2) * 0.577;
+  float d = mix(sphere, octa, uShapeB.z);
+
+  float spk = uShapeA.y;
+  if (spk > 0.01) {
+    float spikeDist = length(p.xz) - 0.15;
+    float spike = max(spikeDist, -(p.y - 1.0 - spk * 1.5));
+    d = min(d, spike);
   }
-  dome += 0.04*sin(p.x*12.0+tw)*sin(p.z*12.0)*uEnergy;
-  return dome;
+
+  float frac = uShapeA.z;
+  if (frac > 0.01) {
+    float cut = abs(sin(p.x * 5.0 + tw) * sin(p.y * 5.0) * sin(p.z * 5.0)) - 0.3 + frac * 0.4;
+    d = max(d, cut * 0.4);
+  }
+
+  float hol = uShapeB.y;
+  if (hol > 0.01) {
+    float inner = -(length(p) - 0.7 + hol * 0.3);
+    d = max(d, inner);
+  }
+
+  d += 0.03 * sin(p.x * 12.0 + tw) * sin(p.y * 12.0) * sin(p.z * 12.0) * uEnergy;
+  d += 0.02 * sin(p.x * 25.0) * sin(p.y * 25.0) * sin(p.z * 25.0) * uChaos;
+
+  return d;
 }
 
-float blackholeSDF(vec3 p, float tw) {
-  float hole = length(p) - 0.4;
-  float diskR = length(p.xz) - 1.5;
-  float disk = sqrt(diskR*diskR+p.y*p.y) - 0.08;
-  disk += 0.06*sin(atan(p.z,p.x)*8.0+tw*3.0)*uEnergy;
-  disk += 0.03*sin(length(p.xz)*12.0-tw*4.0)*uKick;
-  return min(hole, disk);
-}
-
-float shapeSDF(vec3 p, int idx, float tw) {
-  if(idx==0) return torusSDF(p, tw);
-  if(idx==1) return crystalSDF(p, tw);
-  if(idx==2) return jellyfishSDF(p, tw);
-  return blackholeSDF(p, tw);
-}
-
-float morphedSDF(vec3 p, float tw) {
-  float a = shapeSDF(p, uShapeA, tw);
-  float b = shapeSDF(p, uShapeB, tw);
-  return mix(a, b, uMorph);
-}
-
-// ── Tunnel walls: objects arranged cylindrically around camera path ──
+// ── Tunnel walls with generative objects ──
 float tunnelWallSDF(vec3 p) {
-  // Cylindrical coords relative to camera XY path
   vec2 rel = p.xy - uCamXY;
-  float r = length(rel);
   float a = atan(rel.y, rel.x);
 
-  // Domain repeat around the ring and along Z
   float angCount = 14.0;
   float angPeriod = 6.283 / angCount;
   float zPeriod = uRepPeriod * 0.7;
 
   float cellA = floor(a / angPeriod + 0.5);
   float cellZ = floor(p.z / zPeriod + 0.5);
-  float localA = a - cellA * angPeriod;
-  float localZ = p.z - cellZ * zPeriod;
 
   vec3 h = hash31(vec3(cellA, cellZ, 0.0));
 
-  // Place objects at fixed radius from camera — close for intensity
   float wallR = uCorridorR + 1.5 + h.x * 2.5;
   float objAngle = cellA * angPeriod;
   vec3 objPos = vec3(
@@ -294,79 +282,10 @@ float tunnelWallSDF(vec3 p) {
   q /= sc;
 
   float tw = uTime * 1.5 + uEnergy * 2.0 + h.z * 6.283;
-  return morphedSDF(q, tw) * sc;
+  return generativeSDF(q, tw) * sc;
 }
 
-// ── Debris: sparks near tunnel walls ──
-float debrisSDF(vec3 p) {
-  vec2 rel = p.xy - uCamXY;
-  float r = length(rel);
-  if(r < uCorridorR * 0.7) return 20.0;
-
-  float a = atan(rel.y, rel.x);
-  float angPeriod = 6.283 / 28.0;
-  float zPeriod = 1.8;
-  float cellA = floor(a / angPeriod + 0.5);
-  float cellZ = floor(p.z / zPeriod + 0.5);
-
-  vec3 h = hash31(vec3(cellA, cellZ, 100.0));
-  float debR = uCorridorR + 0.3 + h.x * 2.5;
-  float objAngle = cellA * angPeriod;
-  vec3 objPos = vec3(
-    uCamXY.x + cos(objAngle) * debR,
-    uCamXY.y + sin(objAngle) * debR,
-    cellZ * zPeriod + (h.z - 0.5) * zPeriod * 0.3
-  );
-
-  float sz = (0.03 + h.y * 0.12) * uObjScale;
-  return length(p - objPos) - sz;
-}
-
-// ── Corridor dust: tiny sparks that fly through the center ──
-float dustSDF(vec3 p) {
-  float zPeriod = 1.2;
-  float cellZ = floor(p.z / zPeriod + 0.5);
-  float localZ = p.z - cellZ * zPeriod;
-
-  vec3 h = hash31(vec3(cellZ, 0.0, 777.0));
-  vec3 h2 = hash31(vec3(cellZ, 1.0, 777.0));
-
-  // Spread dust across the corridor with slight bias toward edges
-  float dustR = h.x * uCorridorR * 1.2;
-  float dustA = h.y * 6.283;
-  vec3 dustPos = vec3(
-    uCamXY.x + cos(dustA) * dustR,
-    uCamXY.y + sin(dustA) * dustR,
-    cellZ * zPeriod + (h.z - 0.5) * 0.6
-  );
-
-  // Tiny — these are hyperspace sparks
-  float sz = 0.008 + h2.x * 0.025;
-  // Elongate along Z for streak effect at speed
-  vec3 q = p - dustPos;
-  q.z *= 0.3;
-  return length(q) - sz;
-}
-
-// ── Energy ring: mid-zone ring structure that pulses with beat ──
-float energyRingSDF(vec3 p) {
-  vec2 rel = p.xy - uCamXY;
-  float r = length(rel);
-  // Ring at middle distance between camera and tunnel walls
-  float ringR = uCorridorR * 0.6 + uEnergy * 0.5;
-  float zPeriod = 3.0 + uKick * 0.8;
-  float cellZ = floor(p.z / zPeriod + 0.5);
-  float localZ = p.z - cellZ * zPeriod;
-
-  vec3 h = hash31(vec3(cellZ, 0.0, 500.0));
-  // Thin torus ring
-  float torusR = ringR + h.x * 0.5;
-  float tubeR = 0.03 + uKick * 0.06 + uEnergy * 0.03;
-  float d = length(vec2(r - torusR, localZ)) - tubeR;
-  return d;
-}
-
-// ── Grand Attractor: massive black hole always ahead ──
+// ── Grand Attractor ──
 float attractorSDF(vec3 p) {
   vec3 bhPos = vec3(uCamXY, uBHZ);
   vec3 rel = p - bhPos;
@@ -408,104 +327,196 @@ float attractorSDF(vec3 p) {
   return min(horizon, min(mainDisk, min(innerRing, min(midRing, min(outerRing, haloRing)))));
 }
 
-// ── Megastructures: colossal geometry in the far distance ──
-float megastructureSDF(vec3 p) {
-  float megaPeriod = 25.0;
-  float cellZ = floor(p.z / megaPeriod + 0.5);
-  float localZ = p.z - cellZ * megaPeriod;
+// ── Spawn Pool SDF — 7 types ──
+float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
+  float stype = slotA.w;
+  if (stype < 0.5) return 999.0;
 
-  vec3 h = hash31(vec3(cellZ, 0.0, 999.0));
-  vec3 h2 = hash31(vec3(cellZ, 1.0, 999.0));
+  vec3 localP = p - slotA.xyz;
+  float sc = slotB.x;
+  float life = slotB.y;
+  float rotSeed = slotB.z;
 
-  // Place far from camera path — these are background architecture
-  float megaR = uCorridorR + 5.0 + h.x * 8.0;
-  float megaAngle = h.y * 6.283;
-  vec3 center = vec3(
-    uCamXY.x + cos(megaAngle) * megaR,
-    uCamXY.y + sin(megaAngle) * megaR,
-    cellZ * megaPeriod
-  );
+  float envelope = smoothstep(0.0, 0.15, life) * smoothstep(1.0, 0.85, life);
+  if (envelope < 0.01) return 999.0;
 
-  vec3 q = p - center;
-  // Slow rotation — these are massive, they barely move
-  q.xz *= rot2(uTime * 0.02 + h.z * 6.283);
-  q.xy *= rot2(h2.x * 3.14);
+  localP /= (sc * envelope);
+  float spinFast = rotSeed + uTime * 1.5;
+  float spinSlow = rotSeed + uTime * 0.4;
+  localP.xz *= rot2(spinFast);
 
-  float structType = h2.y;
+  float tw = uTime * 1.5 + rotSeed;
   float d;
 
-  if(structType < 0.25) {
-    // Monolith — tall rectangular slab
-    vec3 b = vec3(1.5, 8.0, 0.8);
-    vec3 aq = abs(q) - b;
+  if (stype < 1.5) {
+    // Type 1: Generative parametric cluster — main geometry
+    d = generativeSDF(localP, tw);
+  } else if (stype < 2.5) {
+    // Type 2: Mechanical cross blade — ULTRAKILL weapon cross
+    localP.xy *= rot2(spinFast * 0.7);
+    vec3 ap = abs(localP);
+    float blade1 = max(ap.x - 0.08, max(ap.y - 1.5, ap.z - 0.4));
+    float blade2 = max(ap.y - 0.08, max(ap.x - 1.5, ap.z - 0.4));
+    d = min(blade1, blade2);
+    // Central hub
+    float hub = length(localP) - 0.2;
+    d = min(d, hub);
+    // Edge notches
+    d = max(d, -abs(sin(localP.y * 12.0 + tw) * sin(localP.x * 12.0)) + 0.7);
+  } else if (stype < 3.5) {
+    // Type 3: Ring gate — rectangular frame you fly through
+    vec3 ap = abs(localP);
+    float outerBox = max(ap.x - 3.0, max(ap.y - 3.0, ap.z - 0.3));
+    float innerBox = max(ap.x - 2.4, ap.y - 2.4);
+    d = max(outerBox, -innerBox);
+    // Corner bolts — use mirrored abs coords
+    vec2 cxy = abs(localP.xy) - vec2(2.7);
+    float bolt = length(cxy) - 0.25;
+    d = min(d, max(bolt, ap.z - 0.4));
+  } else if (stype < 4.5) {
+    // Type 4: Void frame — hollow rectangular shell, technical
+    vec3 ap = abs(localP);
+    float outerBox = max(ap.x - 2.0, max(ap.y - 2.0, ap.z - 2.0));
+    float innerBox = max(ap.x - 1.7, max(ap.y - 1.7, ap.z - 1.7));
+    d = max(outerBox, -innerBox);
+    // Cut windows in each face
+    float winX = max(ap.y - 1.3, ap.z - 1.3);
+    float winY = max(ap.x - 1.3, ap.z - 1.3);
+    float winZ = max(ap.x - 1.3, ap.y - 1.3);
+    d = max(d, -min(winX, min(winY, winZ)));
+  } else if (stype < 5.5) {
+    // Type 5: Monolith blade — tall angular slab with mechanical detail
+    localP.xz *= rot2(spinSlow);
+    vec3 b = vec3(0.8, 4.0, 0.15);
+    vec3 aq = abs(localP) - b;
     d = length(max(aq, 0.0)) + min(max(aq.x, max(aq.y, aq.z)), 0.0);
-  } else if(structType < 0.5) {
-    // Ring gate — large torus you could fly through
-    float gateR = 6.0;
-    float tubeR = 0.8;
-    float r2d = length(q.xy) - gateR;
-    d = sqrt(r2d * r2d + q.z * q.z) - tubeR;
-  } else if(structType < 0.75) {
-    // Cross / antenna structure
-    vec3 b1 = vec3(0.6, 10.0, 0.6);
-    vec3 b2 = vec3(6.0, 0.6, 0.6);
-    vec3 aq1 = abs(q) - b1;
-    vec3 aq2 = abs(q) - b2;
-    float d1 = length(max(aq1, 0.0)) + min(max(aq1.x, max(aq1.y, aq1.z)), 0.0);
-    float d2 = length(max(aq2, 0.0)) + min(max(aq2.x, max(aq2.y, aq2.z)), 0.0);
-    d = min(d1, d2);
+    // Horizontal gash lines
+    float gashes = abs(sin(localP.y * 4.0 + tw * 0.3)) - 0.85;
+    d = max(d, -max(gashes, abs(localP.z) - 0.3));
+    // Side fins
+    float fin = max(abs(localP.x) - 1.5, max(abs(localP.y) - 2.0, abs(localP.z) - 0.06));
+    d = min(d, fin);
+  } else if (stype < 6.5) {
+    // Type 6: Shrapnel debris — small angular octahedron spinning fast
+    localP.xy *= rot2(spinFast * 2.0);
+    vec3 ap2 = abs(localP);
+    d = (ap2.x + ap2.y + ap2.z - 0.5) * 0.577;
+  } else if (stype < 7.5) {
+    // Type 7: Energy ring — thin spinning torus, mechanical feel
+    localP.xy *= rot2(spinSlow * 1.5);
+    float torusR = 1.5 + uKick * 0.3;
+    float tubeR = 0.04 + uKick * 0.06;
+    float r2d = length(localP.xz) - torusR;
+    d = sqrt(r2d*r2d + localP.y*localP.y) - tubeR;
+    // Cross spokes
+    float spoke1 = max(abs(localP.x) - 0.04, abs(localP.y) - 0.04);
+    float spoke2 = max(abs(localP.z) - 0.04, abs(localP.y) - 0.04);
+    float spokes = max(min(spoke1, spoke2), -(length(localP.xz) - torusR + tubeR));
+    d = min(d, max(spokes, length(localP.xz) - torusR - tubeR * 0.5));
+  } else if (stype < 8.5) {
+    // Type 8: Spinning gear — toothed ring
+    localP.xz *= rot2(spinFast * 3.0);
+    float gearR = length(localP.xz);
+    float ring = abs(gearR - 1.2) - 0.15;
+    float angle = atan(localP.z, localP.x);
+    float teeth = abs(gearR - 1.5) - 0.08;
+    teeth = max(teeth, -abs(sin(angle * 12.0)) + 0.5);
+    d = min(ring, teeth);
+    d = max(d, abs(localP.y) - 0.12); // flatten
+    // Center axle
+    float axle = length(localP) - 0.15;
+    d = min(d, axle);
+  } else if (stype < 9.5) {
+    // Type 9: Antenna array — central mast + radiating arms
+    float mast = max(abs(localP.x) - 0.06, abs(localP.z) - 0.06);
+    mast = max(mast, abs(localP.y) - 2.0);
+    vec3 armP = localP - vec3(0, 1.5, 0);
+    armP.xz *= rot2(spinSlow * 2.0);
+    float arm1 = max(abs(armP.x) - 1.5, max(abs(armP.y) - 0.04, abs(armP.z) - 0.04));
+    float arm2 = max(abs(armP.z) - 1.5, max(abs(armP.y) - 0.04, abs(armP.x) - 0.04));
+    d = min(mast, min(arm1, arm2));
+    float tip1 = length(armP - vec3(1.5,0,0)) - 0.1;
+    float tip2 = length(armP - vec3(-1.5,0,0)) - 0.1;
+    float tip3 = length(armP - vec3(0,0,1.5)) - 0.1;
+    float tip4 = length(armP - vec3(0,0,-1.5)) - 0.1;
+    d = min(d, min(min(tip1,tip2), min(tip3,tip4)));
+  } else if (stype < 10.5) {
+    // Type 10: Sawblade — spinning notched disc
+    localP.xz *= rot2(spinFast * 4.0);
+    float sbR = length(localP.xz);
+    float disc = max(abs(localP.y) - 0.06, sbR - 1.8);
+    float notch = abs(sin(atan(localP.z, localP.x) * 8.0)) - 0.3;
+    disc = max(disc, -max(notch, -(sbR - 1.4)));
+    float hub = length(localP) - 0.25;
+    d = min(disc, hub);
+  } else if (stype < 11.5) {
+    // Type 11: Piston — cylinder with pumping rod
+    localP.xz *= rot2(spinSlow);
+    float cyl = max(length(localP.xz) - 0.4, abs(localP.y) - 1.5);
+    float rod = max(length(localP.xz) - 0.15, abs(localP.y - 0.8 - sin(tw * 2.0) * 0.6) - 0.8);
+    d = min(cyl, rod);
+    float flange = max(length(localP.xz) - 0.6, abs(localP.y) - 0.08);
+    d = min(d, flange);
+  } else if (stype < 12.5) {
+    // Type 12: Coin — spinning disc on edge
+    localP.xy *= rot2(spinFast * 5.0);
+    float coinR = length(localP.xy);
+    d = max(coinR - 1.0, abs(localP.z) - 0.08);
+    float rim = max(abs(coinR - 0.95) - 0.03, abs(localP.z) - 0.12);
+    d = min(d, rim);
+    d = max(d, -(coinR - 0.3) + 0.05);
+  } else if (stype < 13.5) {
+    // Type 13: Railgun barrel — long cylinder with coil rings
+    localP.yz *= rot2(spinSlow * 0.5);
+    float barrel = max(length(localP.xz) - 0.12, abs(localP.y) - 3.0);
+    d = barrel;
+    float ringY = mod(localP.y + tw * 0.5, 0.8) - 0.4;
+    float coil = max(length(localP.xz) - 0.3, abs(ringY) - 0.06);
+    d = min(d, coil);
+    float muzzle = length(localP - vec3(0, 3.0, 0)) - 0.25;
+    d = min(d, muzzle);
   } else {
-    // Arch / bridge
-    float archR = 5.0;
-    float archTube = 0.6;
-    float r2d = length(q.xy) - archR;
-    d = sqrt(r2d * r2d + q.z * q.z) - archTube;
-    d = max(d, -q.y); // cut bottom half — arch shape
+    // Type 14: Skull fragment — V1 mechanical skull
+    localP.xz *= rot2(spinSlow * 0.3);
+    vec3 sp = localP; sp.y *= 0.7;
+    float skull = length(sp) - 1.0;
+    float eyeL = length(localP - vec3(-0.35, 0.15, -0.8)) - 0.25;
+    float eyeR = length(localP - vec3(0.35, 0.15, -0.8)) - 0.25;
+    skull = max(skull, -min(eyeL, eyeR));
+    vec3 jp = localP - vec3(0, -0.6, -0.4);
+    float jaw = max(abs(jp.x) - 0.5, max(abs(jp.y) - 0.25, abs(jp.z) - 0.4));
+    d = min(skull, jaw);
+    d = max(d, -(length(sp) - 0.85));
   }
 
-  // Subtle energy pulse on surface
-  d += 0.05 * sin(q.x * 3.0 + uTime * 0.5) * sin(q.y * 3.0) * uEnergy * 0.3;
+  d += 0.01 * sin(localP.x*12.0+tw) * sin(localP.y*12.0) * sin(localP.z*12.0) * uEnergy;
 
-  return d;
+  return d * sc * envelope;
 }
 
 // ── Combined Scene ──
 float sceneSDF(vec3 p) {
-  float tw = tunnelWallSDF(p);
-  float db = debrisSDF(p);
-  float du = dustSDF(p);
-  float er = energyRingSDF(p);
-  float mg = megastructureSDF(p);
-  float bh = attractorSDF(p);
-  return min(bh, min(mg, min(er, min(du, min(tw, db)))));
+  float d = min(tunnelWallSDF(p), attractorSDF(p));
+  for (int i = 0; i < 14; i++) {
+    d = min(d, spawnSDF(p, uSpawnA[i], uSpawnB[i]));
+  }
+  return d;
 }
 
 void main() {
   vec2 uv = (vUV*2.0-1.0) * vec2(uRes.x/uRes.y, 1.0);
 
-  // Forward-flying camera
-  float driftX = 0.0;
-  float driftY = 0.0;
-
-  float shakeGate = smoothstep(0.3, 0.7, uEnergy);
-  vec3 shake = vec3(
-    sin(uTime*8.0)*uKick*0.04 + sin(uTime*3.5)*uSnare*0.02,
-    cos(uTime*7.0)*uKick*0.03 + cos(uTime*4.0)*uSnare*0.015,
-    sin(uTime*5.0)*uChaos*0.015
-  ) * shakeGate;
-
-  vec3 ro = vec3(driftX, driftY, uCamZ) + shake;
+  // Camera — no GLSL shake, uCamXY includes JS impulse shake
+  vec3 ro = vec3(uCamXY, uCamZ);
   vec3 lookAt = ro + vec3(0.0, 0.0, 5.0);
 
-  // Camera roll from chaos
-  float roll = sin(uTime*0.15)*0.15 + uChaos*sin(uTime*2.0)*0.2;
+  float roll = sin(uTime*0.15)*0.08 + uChaos*sin(uTime*2.0)*0.1;
   vec3 fwd = normalize(lookAt - ro);
   vec3 worldUp = vec3(sin(roll), cos(roll), 0.0);
   vec3 right = normalize(cross(fwd, worldUp));
   vec3 up = cross(right, fwd);
 
-  // FOV breathes with energy — widens on drops
-  float fov = 1.5 + uKick*0.5;
+  float fov = uFOV;
   vec3 rd = normalize(fwd*fov + uv.x*right + uv.y*up);
 
   // Gravitational lensing — strong, Elite Dangerous style
@@ -536,7 +547,7 @@ void main() {
     minDist = min(minDist, abs(d));
 
     // Volumetric glow — objects emit light proportional to proximity
-    glowAccum += exp(-abs(d) * 4.0) * 0.015 * (0.4 + uKick * 2.0);
+    glowAccum += exp(-abs(d) * 4.0) * 0.012 * (0.4 + uKick * 1.0);
 
     // Track proximity to black hole for special glow — scales with BH size
     float bhProx = length(p - bhPos);
@@ -547,31 +558,31 @@ void main() {
     if(dist > MAX_DIST) break;
   }
 
-  // Palette — hue shifts with music
-  vec3 fogCol = hsl(uHue/360.0, 0.3, 0.015);
-  vec3 kickCol = hsl(310.0/360.0, 1.0, 0.5 + uKick*0.2);
-  vec3 hatCol = hsl(fract(uHue/360.0+0.5), 1.0, 0.5);
-  vec3 snareCol = hsl(fract(uHue/360.0+0.25), 1.0, 0.55);
-  vec3 bhCol = mix(
-    hsl(uHue/360.0, 1.0, 0.6),
-    vec3(1.0, 0.9, 0.7),
-    0.5 + uKick * 0.3
-  );
+  // Monochrome palette
+  vec3 fogCol = vec3(0.01);
+  // Monochrome → red warmth as energy builds
+  vec3 kickCol = vec3(1.0, 0.97 - uEnergy*0.15, 0.93 - uEnergy*0.25);
+  vec3 hatCol = vec3(0.7, 0.73 - uEnergy*0.1, 0.78 - uEnergy*0.15);
+  vec3 snareCol = vec3(0.5, 0.50, 0.53 - uEnergy*0.1);
+  vec3 bhCol = mix(vec3(1.0, 0.95 - uEnergy*0.2, 0.9 - uEnergy*0.3), vec3(1.0, 0.3, 0.15), uKick * uEnergy * 2.0);
 
   vec3 col = fogCol;
 
   if(hit) {
     float dW = tunnelWallSDF(p);
-    float dD = debrisSDF(p);
-    float dDu = dustSDF(p);
-    float dER = energyRingSDF(p);
-    float dMG = megastructureSDF(p);
     float dBH = attractorSDF(p);
-    float nearest = min(dW, min(dD, min(dDu, min(dER, min(dMG, dBH)))));
+    float nearest = min(dW, dBH);
+
+    int hitSpawn = -1;
+    float dSpawn = 999.0;
+    for (int i = 0; i < 14; i++) {
+      float ds = spawnSDF(p, uSpawnA[i], uSpawnB[i]);
+      if (ds < dSpawn) { dSpawn = ds; hitSpawn = i; }
+    }
+    nearest = min(nearest, dSpawn);
 
     vec3 surfCol;
     if(abs(dBH - nearest) < 0.02) {
-      // Black hole
       vec3 bhRel = p - bhPos;
       float tilt = 0.35 + sin(uTime * 0.07) * 0.1;
       bhRel.xy *= rot2(tilt);
@@ -583,60 +594,48 @@ void main() {
         float heat = exp(-abs(diskR2d - uBHSize) * 2.0 / uBHSize);
         float innerHeat = exp(-abs(diskR2d - uBHSize * 0.55) * 4.0 / uBHSize);
         float spin = sin(atan(bhRel.z, bhRel.x) * 12.0 + uTime * 6.0);
-        float spin2 = sin(atan(bhRel.z, bhRel.x) * 20.0 + uTime * 12.0);
-        // Inner ring burns white-hot, outer is colored
-        vec3 innerCol = vec3(1.0, 0.95, 0.85) * (0.4 + uKick * 3.0);
-        surfCol = mix(kickCol, bhCol, heat);
+        vec3 innerCol = vec3(1.0, 0.95, 0.85) * (0.4 + uKick * 1.5);
+        surfCol = mix(snareCol, bhCol, heat);
         surfCol = mix(surfCol, innerCol, innerHeat);
-        surfCol *= (0.3 + uKick * 2.0 + spin * 0.3 * uKick + spin2 * 0.15 * uHat);
+        surfCol *= (0.3 + uKick * 1.0 + spin * 0.2 * uKick);
       }
-    } else if(abs(dER - nearest) < 0.02) {
-      // Energy rings — hot white-cyan, pulse with kick
-      float ringGlow = 0.5 + uKick * 3.0;
-      surfCol = mix(vec3(0.3, 0.8, 1.0), vec3(1.0, 0.6, 0.9), uKick * 0.6 + sin(uTime * 2.0) * 0.3);
-      surfCol *= ringGlow;
-    } else if(abs(dDu - nearest) < 0.02) {
-      // Corridor dust — bright white-blue sparks, flash on hats
-      surfCol = mix(vec3(0.7, 0.85, 1.0), hatCol, 0.3) * (0.6 + uKick*2.0 + uHat*2.5);
-    } else if(abs(dMG - nearest) < 0.02) {
-      // Megastructures — dark silhouettes with edge glow
-      vec3 megaEdge = hsl(fract(uHue/360.0 + 0.15), 0.6, 0.3);
-      surfCol = megaEdge * (0.3 + uEnergy * 0.3 + uKick * 0.4);
-      // Subtle pulse along surface
-      float edgePulse = sin(p.z * 0.5 + uTime * 0.8) * 0.5 + 0.5;
-      surfCol += megaEdge * edgePulse * 0.1;
-    } else if(abs(dW - nearest) < 0.02) {
-      // Tunnel walls
-      float posHue = sin(p.x*0.5+uTime)*0.15 + sin(p.z*0.3-uTime*0.7)*0.1;
-      surfCol = hsl(fract(uHue/360.0 + posHue + uSnare*0.1), 0.9 + uKick*0.1, 0.4 + uKick*0.2);
-      surfCol = mix(surfCol, kickCol, uKick * 0.5);
-      surfCol = mix(surfCol, hatCol, uHat * 0.3);
-      surfCol *= 0.6 + uKick * 2.2;
+    } else if(abs(dSpawn - nearest) < 0.02 && hitSpawn >= 0) {
+      float spawnType = uSpawnA[hitSpawn].w;
+      if (spawnType < 2.5) {
+        surfCol = kickCol * (0.4 + uKick * 1.0);
+      } else if (spawnType < 5.5) {
+        surfCol = hatCol * (0.2 + uEnergy * 0.2 + uKick * 0.3);
+      } else if (spawnType < 6.5) {
+        surfCol = snareCol * (0.5 + uKick * 0.8 + uHat * 0.8);
+      } else if (spawnType < 7.5) {
+        surfCol = vec3(0.8, 0.85, 0.9) * (0.4 + uKick * 1.0);
+      } else if (spawnType < 8.5) {
+        surfCol = kickCol * (0.5 + uKick * 0.8 + uChaos * 0.3);
+      } else {
+        // Types 9+ — moderate metallic
+        surfCol = mix(snareCol, kickCol, uKick * 0.3) * (0.3 + uEnergy * 0.3 + uKick * 0.5);
+      }
     } else {
-      // Debris
-      surfCol = mix(hatCol, snareCol, 0.5) * (0.7 + uKick*1.5 + uHat*2.2);
+      surfCol = mix(snareCol, kickCol, uKick * 0.5);
+      surfCol = mix(surfCol, hatCol, uHat * 0.3);
+      surfCol *= 0.4 + uKick * 1.0;
     }
 
-    float glow = (1.0 + uKick*2.0) / (1.0 + dist*0.08);
+    float glow = (1.0 + uKick*1.0) / (1.0 + dist*0.08);
     col = surfCol * glow;
 
-    // Edge rim that pulses with beat
     vec3 rimCol = mix(hatCol, kickCol, 0.5+0.5*sin(uTime));
-    col += rimCol * smoothstep(0.01, 0.05, minDist) * (0.3 + uKick * 0.5);
+    col += rimCol * smoothstep(0.01, 0.05, minDist) * (0.2 + uKick * 0.4);
   }
 
-  // Black hole volumetric glow — scales with BH size
-  col += bhCol * min(bhGlow, 0.8) * (0.2 + uKick * 2.0);
+  col += bhCol * min(bhGlow, 0.8) * (0.2 + uKick * 1.0);
 
-  // Volumetric glow from all objects — holographic wireframe feel
-  vec3 glowCol = mix(kickCol, hatCol, 0.5+0.5*sin(uTime*0.5));
-  col += glowCol * glowAccum * (0.5 + uKick * 1.0);
+  vec3 glowCol = mix(snareCol, kickCol, 0.5+0.5*sin(uTime*0.5));
+  col += glowCol * glowAccum * (0.4 + uKick * 0.6);
 
-  // Near-miss halo
-  float nearGlow = min(0.05/(0.01+minDist*minDist), 0.8);
-  col += glowCol * nearGlow * (0.1 + uKick * 0.4);
+  float nearGlow = min(0.05/(0.01+minDist*minDist), 0.4);
+  col += glowCol * nearGlow * (0.08 + uKick * 0.2);
 
-  // Distance fog — capped so side objects stay vivid
   float fogFactor = 1.0 - exp(-dist * uFogDensity);
   fogFactor = min(fogFactor, 0.4);
   col = mix(col, fogCol, fogFactor);
@@ -649,7 +648,7 @@ precision highp float;
 in vec2 vUV;
 out vec4 fragColor;
 uniform sampler2D uScene, uPrev;
-uniform float uTime, uEnergy, uKick, uChaos, uPhase, uCamSpeed, uImpact, uFlash;
+uniform float uTime, uEnergy, uKick, uChaos, uCamSpeed, uImpact, uFlash;
 uniform vec2 uRes;
 
 float hash(vec2 p) {
@@ -664,31 +663,9 @@ vec3 samplePrev(vec2 uv) {
   return texture(uPrev, clamp(uv, 0.002, 0.998)).rgb;
 }
 
-vec3 colorGrade(vec3 col, float phase) {
-  float p = mod(phase, 4.0);
-  vec3 tint;
-  float strength;
-
-  if (p < 1.0) {
-    float lum = dot(col, vec3(0.299, 0.587, 0.114));
-    vec3 shadows = vec3(0.3, 0.5, 0.6);
-    vec3 highlights = vec3(1.0, 0.4, 0.7);
-    tint = mix(shadows, highlights, lum);
-    strength = 0.1;
-  } else if (p < 2.0) {
-    tint = mix(col, col * vec3(0.7, 1.2, 0.5), 0.3);
-    return mix(col, tint, 0.3);
-  } else if (p < 3.0) {
-    float lum = dot(col, vec3(0.299, 0.587, 0.114));
-    vec3 shadows = vec3(0.2, 0.3, 0.5);
-    vec3 highlights = vec3(0.8, 0.9, 1.0);
-    tint = mix(shadows, highlights, lum);
-    strength = 0.12;
-  } else {
-    tint = mix(col, col * vec3(1.3, 0.9, 0.5), 0.3);
-    return mix(col, tint, 0.3);
-  }
-  return mix(col, tint, strength);
+vec3 contrastGrade(vec3 col) {
+  col = smoothstep(0.05, 0.95, col);
+  return col;
 }
 
 void main() {
@@ -702,8 +679,14 @@ void main() {
     uv += normalize(center + 0.001) * wave;
   }
 
-  // Scene color — no chromatic aberration
-  vec3 col = sampleScene(uv);
+  // Chromatic aberration — asymmetric R on hard impact (ULTRAKILL)
+  float caStr = 0.002 + uImpact * 0.012 + uKick * 0.005;
+  float caR = caStr * (1.0 + smoothstep(0.1, 0.4, uImpact) * 3.5);
+  vec2 caDir = uv - 0.5;
+  vec3 col;
+  col.r = sampleScene(uv + caDir * caR).r;
+  col.g = sampleScene(uv).g;
+  col.b = sampleScene(uv - caDir * caStr).b;
 
   // Radial zoom blur on impact
   if (uImpact > 0.1) {
@@ -725,7 +708,7 @@ void main() {
     total += w * 2.0;
   }
   bloom = max(bloom/total - ${CFG.post.bloomThreshold.toFixed(1)}, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
-  col += bloom * (0.05 + uKick * 0.35);
+  col += bloom * (0.04 + uKick * 0.2);
 
   // Feedback trail — minimal, kicks only
   float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.004 - uImpact * 0.02;
@@ -735,37 +718,40 @@ void main() {
   prev *= edgeFade;
   col = mix(col, max(prev, col), uKick * 0.08);
 
-  // Kick flash
-  col += vec3(1.0, 0.3, 0.6) * smoothstep(0.8, 1.0, uKick) * 0.12;
+  // Kick flash — white, ULTRAKILL red on hardest
+  vec3 flashCol = mix(vec3(1.0), vec3(1.0, 0.1, 0.05), smoothstep(0.15, 0.35, uKick));
+  col += flashCol * smoothstep(0.12, 0.35, uKick) * 0.15;
 
-  // BH pass-through flash
+  // BH pass-through flash — red-tinted, softer, no white-out
   if (uFlash > 0.01) {
-    float flashStr = pow(uFlash, 0.5);
-    col = mix(col, vec3(1.2), flashStr);
-    if (uFlash > 0.5) col = vec3(1.2);
+    float flashStr = pow(uFlash, 0.7);
+    vec3 bhFlashCol = mix(vec3(0.8, 0.75, 0.7), vec3(1.0, 0.2, 0.1), smoothstep(0.3, 0.8, uFlash));
+    col = mix(col, bhFlashCol, flashStr * 0.6);
   }
 
-  // Flash-frame color inversion on hardest hits
-  if (uImpact > 0.7) {
-    float invStr = (uImpact - 0.7) / 0.3 * 0.6;
+  // Flash-frame color inversion on hardest hits — reduced
+  if (uImpact > 0.8) {
+    float invStr = (uImpact - 0.8) / 0.2 * 0.3;
     col = mix(col, vec3(1.0) - col, invStr);
   }
 
-  // Color grading
-  col = colorGrade(col, uPhase);
+  // Contrast grading — S-curve
+  col = contrastGrade(col);
 
   // Film grain
   float grain = hash(uv * uRes + fract(uTime * 100.0)) - 0.5;
   col += grain * (0.03 + uChaos * 0.04);
 
-  // Vignette — very subtle
+  // Vignette
   vec2 vig = vUV * 2.0 - 1.0;
   float vigF = 1.0 - dot(vig, vig) * 0.12;
   col *= max(vigF, 0.6);
 
-  // Saturation boost only — no tone compression
-  float lum = dot(col, vec3(0.299, 0.587, 0.114));
-  col = mix(vec3(lum), col, ${CFG.post.saturationBoost.toFixed(2)});
+  // Red edge bleed — grows with energy, strongest at screen edges
+  float redVig = dot(vig, vig) * uEnergy * 1.5;
+  col.g -= redVig * 0.12;
+  col.b -= redVig * 0.18;
+
   col = clamp(col, 0.0, 1.0);
 
   fragColor = vec4(col, 1.0);
@@ -806,12 +792,14 @@ function getUniforms(prog, names) {
 }
 
 const sceneU = getUniforms(sceneProg, [
-  'uTime','uEnergy','uKick','uSnare','uHat','uChaos','uHue','uRes','uMorph',
-  'uShapeA','uShapeB','uMouse','uCamZ','uTunnelBlend','uFogDensity','uRepPeriod','uObjScale',
-  'uCamXY','uCorridorR','uBHZ','uBHSize'
+  'uTime','uEnergy','uKick','uSnare','uHat','uChaos','uRes','uFOV',
+  'uShapeA','uShapeB','uCamZ','uFogDensity','uRepPeriod','uObjScale',
+  'uCamXY','uCorridorR','uBHZ','uBHSize',
+  'uSpawnA[0]','uSpawnA[1]','uSpawnA[2]','uSpawnA[3]','uSpawnA[4]','uSpawnA[5]','uSpawnA[6]','uSpawnA[7]','uSpawnA[8]','uSpawnA[9]','uSpawnA[10]','uSpawnA[11]','uSpawnA[12]','uSpawnA[13]',
+  'uSpawnB[0]','uSpawnB[1]','uSpawnB[2]','uSpawnB[3]','uSpawnB[4]','uSpawnB[5]','uSpawnB[6]','uSpawnB[7]','uSpawnB[8]','uSpawnB[9]','uSpawnB[10]','uSpawnB[11]','uSpawnB[12]','uSpawnB[13]',
 ]);
 const postU = getUniforms(postProg, [
-  'uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes','uPhase','uCamSpeed','uImpact','uFlash'
+  'uScene','uPrev','uTime','uEnergy','uKick','uChaos','uRes','uCamSpeed','uImpact','uFlash'
 ]);
 const emptyVAO = gl.createVertexArray();
 
@@ -835,18 +823,26 @@ function createFBO(w, h) {
   return { fb, tex };
 }
 
-function rebuildFBs() {
+let sceneResFactor = 0.5; // half-res default, quarter on hitlag
+
+function rebuildFBs(forceScene) {
   const w = glCanvas.width, h = glCanvas.height;
-  if (w === screenW && h === screenH) return;
+  const newSceneW = Math.floor(w * sceneResFactor);
+  const newSceneH = Math.floor(h * sceneResFactor);
+  const screenChanged = w !== screenW || h !== screenH;
+  const sceneChanged = forceScene || newSceneW !== sceneW || newSceneH !== sceneH;
+  if (!screenChanged && !sceneChanged) return;
   screenW = w; screenH = h;
-  sceneW = w; sceneH = h;
-  for (const o of [sceneFB, ppFB[0], ppFB[1]]) {
-    if (o.fb) gl.deleteFramebuffer(o.fb);
-    if (o.tex) gl.deleteTexture(o.tex);
-  }
+  sceneW = newSceneW; sceneH = newSceneH;
+  if (sceneFB.fb) { gl.deleteFramebuffer(sceneFB.fb); gl.deleteTexture(sceneFB.tex); }
   Object.assign(sceneFB, createFBO(sceneW, sceneH));
-  Object.assign(ppFB[0], createFBO(w, h));
-  Object.assign(ppFB[1], createFBO(w, h));
+  if (screenChanged) {
+    for (const o of [ppFB[0], ppFB[1]]) {
+      if (o.fb) { gl.deleteFramebuffer(o.fb); gl.deleteTexture(o.tex); }
+    }
+    Object.assign(ppFB[0], createFBO(w, h));
+    Object.assign(ppFB[1], createFBO(w, h));
+  }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 
@@ -882,6 +878,7 @@ function initAudio() {
     analyser.connect(audioCtx.destination);
     freqData = new Uint8Array(analyser.frequencyBinCount);
     timeData = new Uint8Array(analyser.frequencyBinCount);
+    initVoice();
   } catch (e) {
     showError('Audio init failed: ' + e.message);
   }
@@ -1127,12 +1124,12 @@ function updateSongSection(dt) {
 
   // Section classification
   energyHistory.prevSection = energyHistory.section;
-  if (energyHistory.ratio > 1.6 && energyHistory.dropCooldown <= 0 && energyHistory.trend > 0.02) {
+  if (energyHistory.ratio > 1.3 && energyHistory.dropCooldown <= 0 && energyHistory.trend > 0.005) {
     energyHistory.section = 'drop';
     energyHistory.dropCooldown = 3.0; // don't re-trigger for 3 seconds
-  } else if (energyHistory.ratio < 0.45 && e < 0.25) {
+  } else if (energyHistory.ratio < 0.55 && e < 0.08) {
     energyHistory.section = 'breakdown';
-  } else if (energyHistory.trend > 0.01 && energyHistory.trendDuration > 1.5) {
+  } else if (energyHistory.trend > 0.005 && energyHistory.trendDuration > 1.0) {
     energyHistory.section = 'buildup';
   } else {
     energyHistory.section = 'sustain';
@@ -1617,6 +1614,14 @@ function updateSpawns() {
     spawnTear();
     if (Math.random() < 0.5) spawnTear();
     if (Math.random() < 0.3) spawnTear(true); // center tear
+    // Ring burst — particles spawn ON the spectrum ring surface
+    const burstR = Math.min(W, H) * 0.32;
+    const burstN = 15 + Math.floor(kd * 60);
+    for (let rb = 0; rb < burstN; rb++) {
+      const ba = Math.random() * Math.PI * 2;
+      spawnOne(W/2 + Math.cos(ba)*burstR, H/2 + Math.sin(ba)*burstR,
+        Math.cos(ba)*200*kd, Math.sin(ba)*200*kd, -1, 3, 0.5, 0);
+    }
   }
   if (snareGated > th.snare) {
     spawnBurst('snare', 0);
@@ -1696,37 +1701,313 @@ function spawnTear(center) {
 let mandalaAlpha = 0;
 let mandalaHue = 0;
 
-// ─── Evolution + Camera State ───────────────────────────────────────
+// ─── SAM.js Voice Engine (ULTRAKILL V1 Robot Voice) ─────────────────
+const VOICE_LINES = {
+  idle: ['SYSTEM ONLINE','STANDBY MODE','AWAITING INPUT','SCANNING FREQUENCIES',
+    'SIGNAL DETECTED','MONITORING','ALL SYSTEMS NOMINAL','RECALIBRATING'],
+  rankUp: ['THREAT LEVEL INCREASING','STYLE RANK ACHIEVED','POWER SURGE DETECTED',
+    'ESCALATING','IMPRESSIVE','EXCEEDING PARAMETERS','LIMIT BREAK'],
+  ultrakill: ['MANKIND IS DEAD','BLOOD IS FUEL','HELL IS FULL','ULTRAKILL',
+    'MAXIMUM STYLE','UNSTOPPABLE','BEYOND HUMAN LIMITS','PERFECTION'],
+  bhPass: ['SINGULARITY BREACH','REALITY TORN','SECTOR OVERWRITTEN',
+    'DIMENSIONAL COLLAPSE','RECONSTRUCTING'],
+  breakdown: ['SIGNAL LOST','ENTERING VOID','SILENCE DETECTED',
+    'POWER DOWN SEQUENCE','STANDBY'],
+  styleBonus: ['HEADSHOT','DOUBLE KILL','TRIPLE KILL','OVERKILL',
+    'PARRY','DISRESPECT','RICOSHOT','ULTRARICOSHOT',
+    'CONDUCTOR','HOMERUN','TERMINAL VELOCITY','GROOVY'],
+  boot: ['BOOT UP SEQUENCE READY','ALL SYSTEMS OPERATIONAL',
+    'MACHINE ID V1','CALIBRATION COMPLETE',
+    'FIRMWARE LOADED','CURRENT OBJECTIVE FIND A WEAPON'],
+};
+let samVoice = null;
+let voiceGain = null;
+let voiceDistortion = null;
+let voiceCooldown = 0;
+function pickVoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function makeVoiceDistortionCurve(amount) {
+  const n = 44100, curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i * 2) / n - 1;
+    curve[i] = ((3 + amount) * x * 20 * (Math.PI / 180)) / (Math.PI + amount * Math.abs(x));
+  }
+  return curve;
+}
+
+function initVoice() {
+  if (typeof SamJs === 'undefined' || !audioCtx) return;
+  samVoice = new SamJs({ pitch: 60, speed: 92, mouth: 190, throat: 190 });
+  voiceDistortion = audioCtx.createWaveShaper();
+  voiceDistortion.curve = makeVoiceDistortionCurve(200);
+  voiceDistortion.oversample = '4x';
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 3000;
+  filter.Q.value = 1.0;
+  voiceGain = audioCtx.createGain();
+  voiceGain.gain.value = 0.35;
+  voiceDistortion.connect(filter);
+  filter.connect(voiceGain);
+  voiceGain.connect(audioCtx.destination);
+}
+
+function speakLine(text) {
+  if (!samVoice || !audioCtx || !voiceDistortion) return;
+  try {
+    const buf = samVoice.buf32(text);
+    if (!buf || buf.length === 0) return;
+    const ab = audioCtx.createBuffer(1, buf.length, 22050);
+    ab.getChannelData(0).set(buf);
+    const src = audioCtx.createBufferSource();
+    src.buffer = ab;
+    src.connect(voiceDistortion);
+    src.start();
+  } catch(e) { /* SAM can fail on some inputs */ }
+}
+
+// Style bonus text state
+let styleBonusText = '';
+let styleBonusAlpha = 0;
+
+// ─── Camera + Impact State ──────────────────────────────────────────
 let cameraZ = 0;
 let cameraSpeed = 0;
 
-// Black hole: fixed world position, you approach and pass through it
+// Black hole
 let bhWorldZ = 40.0;
 let bhPassFlash = 0;
-let impactIntensity = 0; // kick impact for post-processing distortion
+let impactIntensity = 0;
 
-// Look-ahead state (Phase 2C) — fed from offline analysis each frame
+// Look-ahead state
 let lookAhead = {
-  nextDropIn: 999,      // seconds until next energy spike
-  sectionProgress: 0,   // 0-1 how far through current section
-  beatPhase: 0,         // 0-1 position within beat grid
-  anticipation: 0,      // 0-1 smoothed anticipation intensity (ramps up before drops)
+  nextDropIn: 999, sectionProgress: 0, beatPhase: 0, anticipation: 0,
 };
 
-// Evolution phase system
-let evoPhaseIdx = 0;
-let evoPhaseTimer = 0;
+// ULTRAKILL Impact System
+let hitlagFrames = 0;
+let shakeX = 0, shakeY = 0;
+let fovCurrent = 1.5, fovTarget = 1.5;
+const FOV_BASE = 1.5;
+
+// Audio-driven evolution (replaces phase system)
 const evoSmooth = {
-  repPeriod: 6.0, fogDensity: 0.06, speedMul: 1.0,
-  tunnelBlend: 0.0, objScale: 1.0, colorGrade: 0,
+  repPeriod: 5.0, fogDensity: 0.04, speedMul: 1.0, objScale: 0.9, corridorR: 3.0,
+};
+const shapeParams = {
+  symmetry: 5.0, spike: 0.0, fracture: 0.0,
+  twist: 0.0, hollow: 0.0, angular: 0.5,
 };
 
-// Shape morphing
-let currentShape = 0;
-let nextShape = 1;
-let shapeTimer = 0;
-let morphProgress = 0;
-let isMorphing = false;
+// ─── Spawn Pool ────────────────────────────────────────────────────
+const POOL_SIZE = 14;
+const spawnPool = Array.from({length: POOL_SIZE}, () => ({
+  active: false, type: 0,
+  x: 0, y: 0, z: 0,
+  scale: 1, life: 0, maxLife: 5, age: 0, rotSeed: 0,
+}));
+const spawnCooldowns = { kick: 0, snare: 0, hat: 0, drop: 0, breakdown: 0, sustained: 0, ambient: 0 };
+const rebuildQueue = []; // timed spawn sequence after BH pass
+
+function allocSpawnSlot() {
+  for (let i = 0; i < POOL_SIZE; i++) if (!spawnPool[i].active) return i;
+  let oldest = 0, oldestAge = 0;
+  for (let i = 0; i < POOL_SIZE; i++) if (spawnPool[i].age > oldestAge) { oldestAge = spawnPool[i].age; oldest = i; }
+  return oldest;
+}
+
+function spawnObject(type, zAhead, xyRadius, scale, maxLife) {
+  const i = allocSpawnSlot();
+  const s = spawnPool[i];
+  const angle = Math.random() * Math.PI * 2;
+  // Enforce peripheral placement — never inside the corridor
+  const minR = evoSmooth.corridorR + 0.8;
+  const effectiveR = Math.max(xyRadius, minR);
+  s.active = true;
+  s.type = type;
+  s.x = shakeX + Math.cos(angle) * effectiveR;
+  s.y = shakeY + Math.sin(angle) * effectiveR;
+  s.z = cameraZ + zAhead;
+  s.scale = scale * 0.85;
+  s.maxLife = maxLife;
+  s.age = 0;
+  s.life = 0;
+  s.rotSeed = Math.random() * 6.283;
+}
+
+// ─── Style Meter ───────────────────────────────────────────────────
+const STYLE_RANKS = [
+  { threshold: 0.0,   label: 'STATIC',    color: 'rgba(100,105,110,' },
+  { threshold: 0.03,  label: 'RISING',    color: 'rgba(150,155,160,' },
+  { threshold: 0.07,  label: 'VOLATILE',  color: 'rgba(200,205,210,' },
+  { threshold: 0.13,  label: 'UNHINGED',  color: 'rgba(230,235,240,' },
+  { threshold: 0.19,  label: 'BREAKCORE', color: 'rgba(255,255,255,' },
+  { threshold: 0.25,  label: 'ULTRAKILL', color: 'rgba(255,60,40,' },
+];
+let styleRank = 0;
+let styleFlash = 0;
+let styleShake = 0;
+let styleSustainTime = 0;
+let smoothStyleEnergy = 0;
+let prevStyleRank = 0; // for rank change detection
+
+// ── ULTRAKILL Tech Text System ──
+const TECH_TEXTS = [
+  '#INCLUDE <breakcore.h>', '#INCLUDE <permutation.transmutation.annihilation>',
+  'SYSTEM V1 INITIALIZED', 'DIAGNOSTICS_OK', 'STANDBY — WAIT FOR WAKE',
+  'float energy = ${e};', 'vec3 col = vec3(${k});', 'uniform float uKick;',
+  'EARLY_ACCESS READY', '0x${hex}', 'SECTOR_OVERWRITTEN',
+  'SIGNAL LOST', 'RECONSTRUCTING...', 'STYLE: ${style}',
+  'KILL_COUNT++', 'PRESSURE: ${bp}', 'DAMAGE: ${dmg}',
+  'WARNING: THRESHOLD EXCEEDED', 'MEMORY_LEAK DETECTED',
+  'for(int i=0;i<INFINITY;i++)', 'return chaos;',
+  '// TODO: fix reality', 'assert(alive);',
+  'VELOCITY: ${spd}', 'DEPTH: ${z}', 'CHAOS: ${chaos}',
+  '#define BREAKCORE 1', 'pragma once', 'void main() {',
+  'gl_FragColor = blood;', 'if(dead) respawn();',
+  'MANKIND IS DEAD', 'BLOOD IS FUEL', 'HELL IS FULL',
+  'MACHINE HAS SPOKEN', 'V1_ACTIVE', 'COIN_TOSS++',
+  'PARRY: SUCCESS', 'RICOSHOT CONFIRMED', 'DAMAGE: CRITICAL',
+  'STYLE_BONUS += ${dmg}', 'WEAPON_SWAP()', 'overheat = true;',
+  'FEED_THE_MACHINE', 'NO_MERCY_MODE', 'struct V1 { blood: f32 }',
+  'TERMINAL_VELOCITY', 'GREED_LAYER_ACTIVE', '// god is dead',
+];
+const techTextPool = [];
+const MAX_TECH_TEXTS = 20;
+let techTextCooldown = 0;
+
+function spawnTechText(energy, kick, side) {
+  if (techTextPool.length >= MAX_TECH_TEXTS) {
+    // Remove oldest
+    techTextPool.shift();
+  }
+  const W = window.innerWidth, H = window.innerHeight;
+  if (!side && Math.random() < 0.1) side = 'center';
+  side = side || ['left','right','top','bottom'][Math.floor(Math.random() * 4)];
+  let x, y, align;
+  if (side === 'center') {
+    x = W * 0.3 + Math.random() * W * 0.4;
+    y = H * 0.3 + Math.random() * H * 0.4;
+    align = 'center';
+  } else if (side === 'left') {
+    x = 10 + Math.random() * W * 0.12;
+    y = 30 + Math.random() * H * 0.85;
+    align = 'left';
+  } else if (side === 'right') {
+    x = W - 10 - Math.random() * W * 0.12;
+    y = 30 + Math.random() * H * 0.85;
+    align = 'right';
+  } else if (side === 'top') {
+    x = W * 0.1 + Math.random() * W * 0.8;
+    y = 10 + Math.random() * H * 0.12;
+    align = 'center';
+  } else {
+    x = W * 0.1 + Math.random() * W * 0.8;
+    y = H * 0.88 + Math.random() * H * 0.07;
+    align = 'center';
+  }
+  const template = TECH_TEXTS[Math.floor(Math.random() * TECH_TEXTS.length)];
+  techTextPool.push({
+    template, x, y, align, side,
+    age: 0, maxLife: 2 + Math.random() * 3,
+    fontSize: 10 + Math.floor(Math.random() * 7),
+  });
+}
+
+function resolveTechText(template, energy, kick, chaos, speed, z) {
+  return template
+    .replace('${e}', energy.toFixed(3))
+    .replace('${k}', kick.toFixed(2))
+    .replace('${style}', STYLE_RANKS[styleRank].label)
+    .replace('${spd}', speed.toFixed(1))
+    .replace('${z}', z.toFixed(0))
+    .replace('${chaos}', chaos.toFixed(2))
+    .replace('${hex}', Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0'))
+    .replace('${bp}', (80 + energy * 120).toFixed(0))
+    .replace('${dmg}', (kick * 999).toFixed(0));
+}
+
+// ── Side Data Lines ──
+const dataLines = [];
+const MAX_DATA_LINES = 16;
+let dataLineCooldown = 0;
+function spawnDataLine() {
+  const H = window.innerHeight;
+  const side = Math.random() < 0.5 ? 'left' : 'right';
+  dataLines.push({
+    y: 30 + Math.random() * (H - 60), side,
+    length: 20 + Math.random() * 60,
+    speed: 30 + Math.random() * 50,
+    life: 1.5 + Math.random() * 2, age: 0,
+    thickness: 1 + Math.random(),
+  });
+  if (dataLines.length > MAX_DATA_LINES) dataLines.shift();
+}
+
+// ── Telemetry recorder ──
+const telemetryLog = [];
+let telemetryTimer = 0;
+const TELEMETRY_INTERVAL = 0.5; // sample every 0.5s
+let telemetryTime = 0;
+
+function recordTelemetry(energy, kick, snare, hat, chaos, section, styleRank, spawns, fov, speed) {
+  telemetryLog.push({
+    t: telemetryTime.toFixed(1),
+    energy: energy.toFixed(3),
+    kick: kick.toFixed(3),
+    snare: snare.toFixed(3),
+    hat: hat.toFixed(3),
+    chaos: chaos.toFixed(3),
+    section,
+    style: STYLE_RANKS[styleRank].label,
+    styleIdx: styleRank,
+    smoothE: smoothStyleEnergy.toFixed(3),
+    spawns,
+    fov: fov.toFixed(2),
+    speed: speed.toFixed(1),
+    hitlag: hitlagFrames,
+    impact: impactIntensity.toFixed(2),
+    bhFlash: bhPassFlash.toFixed(2),
+  });
+}
+
+function downloadTelemetry() {
+  if (telemetryLog.length === 0) { console.log('No telemetry data'); return; }
+  // Summary stats
+  const energies = telemetryLog.map(r => parseFloat(r.energy));
+  const maxE = Math.max(...energies);
+  const avgE = energies.reduce((a,b) => a+b, 0) / energies.length;
+  const p90E = energies.sort((a,b) => a-b)[Math.floor(energies.length * 0.9)];
+  const sections = {};
+  const styles = {};
+  telemetryLog.forEach(r => {
+    sections[r.section] = (sections[r.section] || 0) + 1;
+    styles[r.style] = (styles[r.style] || 0) + 1;
+  });
+  const header = [
+    `=== TELEMETRY REPORT ===`,
+    `Duration: ${telemetryLog[telemetryLog.length-1].t}s | Samples: ${telemetryLog.length}`,
+    `Energy — max: ${maxE.toFixed(3)} avg: ${avgE.toFixed(3)} p90: ${p90E.toFixed(3)}`,
+    `Sections: ${JSON.stringify(sections)}`,
+    `Styles: ${JSON.stringify(styles)}`,
+    ``,
+    `t\tenergy\tkick\tsnare\that\tchaos\tsection\tstyle\tsmoothE\tspawns\tfov\tspeed\thitlag\timpact\tbhFlash`,
+  ].join('\n');
+  const rows = telemetryLog.map(r =>
+    `${r.t}\t${r.energy}\t${r.kick}\t${r.snare}\t${r.hat}\t${r.chaos}\t${r.section}\t${r.style}\t${r.smoothE}\t${r.spawns}\t${r.fov}\t${r.speed}\t${r.hitlag}\t${r.impact}\t${r.bhFlash}`
+  ).join('\n');
+  const text = header + '\n' + rows;
+  const blob = new Blob([text], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'breakcore-telemetry.txt';
+  a.click();
+  console.log(`Telemetry downloaded: ${telemetryLog.length} samples, max energy ${maxE.toFixed(3)}`);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'l' || e.key === 'L') downloadTelemetry();
+});
 
 // Mouse tracking
 let mouseX = 0.5, mouseY = 0.5;
@@ -1759,6 +2040,33 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
   ctx.clearRect(0, 0, W, H);
   overlayTime += dt;
   const cx = W / 2, cy = H / 2;
+  const isUK = styleRank >= 5;
+  const isBK = styleRank >= 4;
+
+  // ── Corner Brackets (technical viewfinder) ──
+  if (isPlaying) {
+    const bracketLen = 35 + energy * 15;
+    const bracketInset = 12;
+    const bracketAlpha = 0.2 + energy * 0.5 + kick * 0.3;
+    ctx.strokeStyle = isUK ? `rgba(255,60,40,${bracketAlpha.toFixed(2)})` : `rgba(180,185,190,${bracketAlpha.toFixed(2)})`;
+    ctx.lineWidth = 1.5;
+    // Top-left
+    ctx.beginPath();
+    ctx.moveTo(bracketInset, bracketInset + bracketLen); ctx.lineTo(bracketInset, bracketInset); ctx.lineTo(bracketInset + bracketLen, bracketInset);
+    ctx.stroke();
+    // Top-right
+    ctx.beginPath();
+    ctx.moveTo(W - bracketInset - bracketLen, bracketInset); ctx.lineTo(W - bracketInset, bracketInset); ctx.lineTo(W - bracketInset, bracketInset + bracketLen);
+    ctx.stroke();
+    // Bottom-left
+    ctx.beginPath();
+    ctx.moveTo(bracketInset, H - bracketInset - bracketLen); ctx.lineTo(bracketInset, H - bracketInset); ctx.lineTo(bracketInset + bracketLen, H - bracketInset);
+    ctx.stroke();
+    // Bottom-right
+    ctx.beginPath();
+    ctx.moveTo(W - bracketInset - bracketLen, H - bracketInset); ctx.lineTo(W - bracketInset, H - bracketInset); ctx.lineTo(W - bracketInset, H - bracketInset - bracketLen);
+    ctx.stroke();
+  }
 
   // Vanishing point — fixed at center
   const vpX = cx;
@@ -1817,8 +2125,8 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     const streakLen = s.dist * starSpeed * 2.5 * (1.0 + s._lensed * 3.0);
 
     ctx.globalAlpha = alpha * (1.0 + s._lensed * 0.5);
-    const starLit = 70 + Math.floor(s._lensed * 20);
-    ctx.strokeStyle = `hsl(${s.hue},${80 + Math.floor(s._lensed * 20)}%,${starLit}%)`;
+    const starLit = 60 + Math.floor(s._lensed * 30);
+    ctx.strokeStyle = `rgba(${starLit + 20},${starLit + 25},${starLit + 30},1)`;
     ctx.lineWidth = sz * (0.4 + s._lensed * 0.6);
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -1828,20 +2136,47 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
   ctx.globalAlpha = 1;
 
   if (isPlaying && freqData) {
-    // Side Frequency Bars — subtle peripheral accent
-    const barH = H * 0.5;
-    const startY = H * 0.25;
+    // Side Frequency Bars — enhanced peripheral accent
+    const barH = H * 0.7;
+    const startY = H * 0.15;
     for (let i = 0; i < CFG.numBars; i++) {
       const v = smoothBars[i];
       const yPos = startY + i * (barH / CFG.numBars);
-      const barLen = v * W * 0.10;
-      const barHue = 310 - i * (310 / CFG.numBars) + (hue * 0.3);
-      const sat = i > CFG.numBars * 0.8 ? 60 : 100;
-      const lit = 35 + v * 25;
-      ctx.fillStyle = `hsla(${barHue},${sat}%,${lit}%,${0.3 + v * 0.35})`;
-      ctx.fillRect(0, yPos, barLen, Math.max(1, barH / CFG.numBars - 2));
-      ctx.fillRect(W - barLen, yPos, barLen, Math.max(1, barH / CFG.numBars - 2));
+      const barLen = v * W * 0.12;
+      const bW = Math.max(2, barH / CFG.numBars - 1);
+      const lit = Math.floor(80 + v * 130);
+      const bR = isBK ? Math.min(255, lit + 80) : lit;
+      const bG = isBK ? Math.floor(lit * 0.5) : lit + 5;
+      const bB = isBK ? Math.floor(lit * 0.3) : lit + 10;
+      ctx.fillStyle = `rgba(${bR},${bG},${bB},${0.3 + v * 0.4})`;
+      ctx.fillRect(0, yPos, barLen, bW);
+      ctx.fillRect(W - barLen, yPos, barLen, bW);
+      // Tick marks at bar ends
+      if (v > 0.3) {
+        ctx.fillRect(barLen, yPos, 2, bW);
+        ctx.fillRect(W - barLen - 2, yPos, 2, bW);
+      }
     }
+
+    // ── Side Data Lines — streaming from edges ──
+    dataLineCooldown -= dt;
+    if (dataLineCooldown <= 0) {
+      dataLineCooldown = 0.5 + Math.random() * 1.0 - energy * 1.5;
+      dataLineCooldown = Math.max(0.15, dataLineCooldown);
+      spawnDataLine();
+    }
+    for (let i = dataLines.length - 1; i >= 0; i--) {
+      const dl = dataLines[i];
+      dl.age += dt;
+      if (dl.age >= dl.life) { dataLines.splice(i, 1); continue; }
+      const alpha = Math.min(1, dl.age / 0.2) * Math.min(1, (dl.life - dl.age) / 0.3);
+      const inset = Math.min(1, dl.age * dl.speed / 100) * W * 0.08;
+      const dlX = dl.side === 'left' ? inset : W - inset - dl.length;
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.fillStyle = isUK ? 'rgba(255,60,40,1)' : isBK ? 'rgba(200,180,175,1)' : 'rgba(140,145,150,1)';
+      ctx.fillRect(dlX, dl.y, dl.length, dl.thickness);
+    }
+    ctx.globalAlpha = 1;
 
     // ── Outer Spectrum Ring — breathes with KICK, not general energy ──
     // Anticipation "inhale": ring contracts before drops, then explodes on drop
@@ -1858,12 +2193,77 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       const angle = (i / 128) * Math.PI * 2 - Math.PI / 2;
       const outerSpike = ringR + v * ringR * 0.5;
       const innerSpike = ringR - v * ringR * 0.2;
-      const rHue = (hue + i * (360 / 128)) % 360;
-      ctx.strokeStyle = `hsla(${rHue},90%,${50 + v * 25}%,${0.4 + v * 0.45})`;
+      const rLit = Math.floor(120 + v * 135);
+      const rR = isBK ? 255 : rLit;
+      const rG = isBK ? Math.floor(rLit * 0.6) : rLit + 3;
+      const rB = isBK ? Math.floor(rLit * 0.4) : rLit + 5;
+      ctx.strokeStyle = `rgba(${rR},${rG},${rB},${0.35 + v * 0.4})`;
       ctx.beginPath();
       ctx.moveTo(ringCX + Math.cos(angle) * innerSpike, ringCY + Math.sin(angle) * innerSpike);
       ctx.lineTo(ringCX + Math.cos(angle) * outerSpike, ringCY + Math.sin(angle) * outerSpike);
       ctx.stroke();
+    }
+
+    // ── Circular Waveform Scope (inside spectrum ring) ──
+    if (timeData) {
+      const waveR = ringR * 0.6;
+      ctx.beginPath();
+      ctx.strokeStyle = isUK ? 'rgba(255,60,40,0.3)' : 'rgba(160,165,170,0.25)';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 256; i++) {
+        const wt = i / 256;
+        const wAngle = wt * Math.PI * 2 - Math.PI / 2;
+        const wv = (timeData[Math.floor(wt * timeData.length)] - 128) / 128;
+        const wr = waveR * (1.0 + wv * 0.3);
+        const wx = ringCX + Math.cos(wAngle) * wr;
+        const wy = ringCY + Math.sin(wAngle) * wr;
+        if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // ── Frequency Fill Rings (center density) ──
+    const innerBands = [
+      { band: bands.sub, rMul: 0.45, color: isUK ? '255,60,40' : '180,185,190' },
+      { band: bands.low, rMul: 0.30, color: isUK ? '255,80,60' : '160,165,170' },
+      { band: bands.mid, rMul: 0.18, color: isUK ? '255,100,80' : '140,145,150' },
+    ];
+    for (const ib of innerBands) {
+      const ir = ringR * ib.rMul * (1.0 + ib.band * 0.3);
+      ctx.globalAlpha = 0.06 + ib.band * 0.12;
+      ctx.fillStyle = `rgba(${ib.color},1)`;
+      ctx.beginPath();
+      ctx.arc(ringCX, ringCY, ir, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── Center Targeting Reticle ──
+    const reticleSize = 15 + kick * 20;
+    const reticleAlpha = 0.15 + kick * 0.3;
+    ctx.strokeStyle = isUK ? `rgba(255,60,40,${reticleAlpha.toFixed(2)})` : `rgba(180,185,190,${reticleAlpha.toFixed(2)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - reticleSize, cy); ctx.lineTo(cx - 5, cy);
+    ctx.moveTo(cx + 5, cy); ctx.lineTo(cx + reticleSize, cy);
+    ctx.moveTo(cx, cy - reticleSize); ctx.lineTo(cx, cy - 5);
+    ctx.moveTo(cx, cy + 5); ctx.lineTo(cx, cy + reticleSize);
+    ctx.stroke();
+    ctx.globalAlpha = reticleAlpha * 0.5;
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    ctx.globalAlpha = 1;
+
+    // ── Style Bonus Text Flash ──
+    if (styleBonusAlpha > 0.05) {
+      ctx.font = `bold ${Math.floor(28 + styleBonusAlpha * 12)}px 'Courier New', monospace`;
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = styleBonusAlpha;
+      ctx.fillStyle = isUK ? `rgba(255,60,40,1)` : `rgba(255,255,255,1)`;
+      ctx.fillText(styleBonusText, cx + (Math.random()-0.5)*4, cy - ringR * 0.7);
+      ctx.textAlign = 'start';
+      ctx.globalAlpha = 1;
     }
 
     // Spinning Wireframe Shapes with parallax
@@ -1880,10 +2280,9 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       const sy = sh.y;
       const r = (60 + sh.band * 120) * sh.rMul;
       const rot = overlayTime * sh.speed;
-      const shHue = (hue + sh.sides * 50) % 360;
-      drawPolygon(sx, sy, r, sh.sides, rot, `hsl(${shHue},80%,50%)`, 0.25 + sh.band * 0.3, 1.5);
-      drawPolygon(sx, sy, r*0.65, sh.sides, -rot*1.3, `hsl(${(shHue+40)%360},60%,45%)`, 0.18 + sh.band * 0.2, 1);
-      drawPolygon(sx, sy, r*0.35, sh.sides, rot*2, `hsl(${(shHue+80)%360},70%,50%)`, 0.12 + sh.band * 0.18, 0.8);
+      drawPolygon(sx, sy, r, sh.sides, rot, `rgba(180,185,190,1)`, 0.2 + sh.band * 0.25, 1.5);
+      drawPolygon(sx, sy, r*0.65, sh.sides, -rot*1.3, `rgba(140,145,150,1)`, 0.15 + sh.band * 0.18, 1);
+      drawPolygon(sx, sy, r*0.35, sh.sides, rot*2, `rgba(160,165,170,1)`, 0.1 + sh.band * 0.15, 0.8);
     }
 
     // Bass Pulse Arcs — kick-driven only
@@ -1893,9 +2292,8 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       const arcR = bassR * (0.6 + i * 0.2) + bassKick * 30;
       const arcStart = Math.PI * 0.55 + i * 0.08;
       const arcEnd = Math.PI * 0.95 - i * 0.08;
-      const arcHue = (hue + 310 + i * 30) % 360;
-      ctx.globalAlpha = 0.15 + bassKick * 0.35;
-      ctx.strokeStyle = `hsl(${arcHue},80%,50%)`;
+      ctx.globalAlpha = 0.12 + bassKick * 0.3;
+      ctx.strokeStyle = `rgba(${160 + i*20},${165 + i*20},${170 + i*20},1)`;
       ctx.lineWidth = 1.5 + bassKick * 2.5;
       ctx.beginPath(); ctx.arc(cx, cy + H * 0.1, arcR, arcStart, arcEnd); ctx.stroke();
       ctx.beginPath(); ctx.arc(cx, cy + H * 0.1, arcR, Math.PI + (Math.PI - arcEnd), Math.PI + (Math.PI - arcStart)); ctx.stroke();
@@ -1909,7 +2307,7 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       ring.life -= dt;
       if (ring.life <= 0) { shockRings.splice(i, 1); continue; }
       ctx.globalAlpha = ring.life * 0.4;
-      ctx.strokeStyle = `hsl(${ring.hue},80%,55%)`;
+      ctx.strokeStyle = isUK ? `rgba(255,60,40,1)` : isBK ? `rgba(255,210,200,1)` : `rgba(200,205,210,1)`;
       ctx.lineWidth = 2 + ring.life * 3;
       ctx.beginPath(); ctx.arc(vpX, vpY, ring.r, 0, Math.PI * 2); ctx.stroke();
     }
@@ -1925,7 +2323,7 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     for (let layer = 0; layer < 3; layer++) {
       const lr = mR * (0.3 + layer * 0.3);
       ctx.globalAlpha = mandalaAlpha * (0.6 - layer * 0.15);
-      ctx.strokeStyle = `hsl(${(mandalaHue + layer * 60) % 360},80%,60%)`;
+      ctx.strokeStyle = `rgba(${180 + layer*20},${185 + layer*20},${190 + layer*20},1)`;
       for (let i = 0; i < petals; i++) {
         const a = (i / petals) * Math.PI * 2 + overlayTime * 0.2 * (layer % 2 === 0 ? 1 : -1);
         ctx.beginPath();
@@ -1950,7 +2348,7 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     if (Math.random() < 0.3) continue;
 
     ctx.globalAlpha = alpha * 0.8;
-    ctx.fillStyle = `hsl(${t.hue},100%,70%)`;
+    ctx.fillStyle = isUK ? `rgba(255,40,30,1)` : isBK ? `rgba(255,200,190,1)` : `rgba(220,225,230,1)`;
     if (t.jagged) {
       for (let s = 0; s < 5; s++) {
         const segY = t.y - t.h/2 + s * (t.h/5);
@@ -1963,9 +2361,9 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     ctx.fillStyle = '#fff';
     ctx.fillRect(t.x + t.w*0.3, t.y - t.h*0.4, t.w*0.4, t.h*0.8);
     ctx.globalAlpha = alpha * 0.3;
-    ctx.fillStyle = `hsl(${(t.hue+120)%360},100%,60%)`;
+    ctx.fillStyle = `rgba(160,165,170,1)`;
     ctx.fillRect(t.x - 4, t.y - t.h*0.3, 3, t.h*0.6);
-    ctx.fillStyle = `hsl(${(t.hue+240)%360},100%,60%)`;
+    ctx.fillStyle = `rgba(140,145,150,1)`;
     ctx.fillRect(t.x + t.w + 1, t.y - t.h*0.3, 3, t.h*0.6);
   }
   ctx.globalAlpha = 1;
@@ -1986,7 +2384,7 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     // Volume fill
     ctx.globalAlpha = baseAlpha;
     const fillH = barH * volume;
-    ctx.fillStyle = `hsl(${hue},80%,60%)`;
+    ctx.fillStyle = `rgba(200,205,210,1)`;
     ctx.fillRect(barX, barY + barH - fillH, barW, fillH);
 
     // Energy level indicator (thin line)
@@ -2010,10 +2408,101 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     const a = p.life / p.maxLife;
     const s = p.size * a;
     ctx.globalAlpha = a;
-    ctx.fillStyle = `hsl(${p.hue},100%,65%)`;
+    const isRed = p.hue < 0; // negative hue = ULTRAKILL red particle
+    ctx.fillStyle = isRed ? `rgba(255,60,40,1)` : `rgba(${180 + Math.floor(a*60)},${185 + Math.floor(a*60)},${190 + Math.floor(a*60)},1)`;
     ctx.fillRect(p.x - s * 0.5, p.y - s * 0.5, s, s);
   }
   ctx.globalAlpha = 1;
+
+  // ── ULTRAKILL Tech Text ──
+  if (isPlaying) {
+    // Update existing texts
+    for (let i = techTextPool.length - 1; i >= 0; i--) {
+      techTextPool[i].age += dt;
+      if (techTextPool[i].age >= techTextPool[i].maxLife) { techTextPool.splice(i, 1); continue; }
+      const t = techTextPool[i];
+      const life = t.age / t.maxLife;
+      const fadeIn = Math.min(1, t.age / 0.3);
+      const fadeOut = Math.min(1, (t.maxLife - t.age) / 0.5);
+      const alpha = fadeIn * fadeOut * (0.4 + energy * 0.4) * (t.side === 'center' ? 0.4 : 1.0);
+      const text = resolveTechText(t.template, energy, kick, chaosMetric, cameraSpeed, cameraZ);
+      ctx.font = `${t.fontSize}px 'Courier New', monospace`;
+      ctx.textAlign = t.align;
+      const isUK = styleRank >= 5;
+      const isBK = styleRank >= 4;
+      ctx.fillStyle = isUK ? `rgba(255,60,40,${alpha.toFixed(2)})` : isBK ? `rgba(255,220,210,${alpha.toFixed(2)})` : `rgba(140,145,150,${alpha.toFixed(2)})`;
+      ctx.globalAlpha = alpha;
+      ctx.fillText(text, t.x, t.y);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'start';
+    // Spawn new texts
+    techTextCooldown -= dt;
+    if (techTextCooldown <= 0) {
+      techTextCooldown = 1.5 + Math.random() * 2.0 - energy * 3.0;
+      if (styleRank >= 5) techTextCooldown *= 0.4;
+      else if (styleRank >= 4) techTextCooldown *= 0.6;
+      techTextCooldown = Math.max(0.2, techTextCooldown);
+      spawnTechText(energy, kick);
+    }
+  }
+
+  // ── Edge Warning Strips (ULTRAKILL rank) ──
+  if (isPlaying && isUK) {
+    const stripH = 3;
+    const segW = 12;
+    const scroll = (overlayTime * 80) % (segW * 2);
+    ctx.globalAlpha = 0.4 + kick * 0.4;
+    for (let x = -segW * 2; x < W + segW; x += segW * 2) {
+      ctx.fillStyle = 'rgba(255,40,30,1)';
+      ctx.fillRect(x + scroll, 0, segW, stripH);
+      ctx.fillRect(x + scroll, H - stripH, segW, stripH);
+      ctx.fillStyle = 'rgba(40,0,0,1)';
+      ctx.fillRect(x + scroll + segW, 0, segW, stripH);
+      ctx.fillRect(x + scroll + segW, H - stripH, segW, stripH);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ── Rank-up screen flash ──
+  if (styleFlash > 0.5) {
+    const rank = STYLE_RANKS[styleRank];
+    ctx.globalAlpha = (styleFlash - 0.5) * 0.15;
+    ctx.fillStyle = rank.color + '1)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  // ── Style Meter ──
+  if (isPlaying) {
+    const rank = STYLE_RANKS[styleRank];
+    const meterX = W * 0.5 + styleShake * 8;
+    const meterY = H - 60;
+    const ukPulse = isUK ? 1.0 + Math.sin(overlayTime * 25) * 0.08 : 1.0;
+    const fontSize = (48 + styleFlash * 20) * ukPulse;
+    ctx.font = `bold ${Math.floor(fontSize)}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Glow behind text — bigger at ULTRAKILL
+    const glowSize = isUK ? 3 : 1;
+    const glowAlpha = (isUK ? 0.5 : 0.3) + styleFlash * 0.5;
+    ctx.globalAlpha = glowAlpha * 0.3;
+    ctx.fillStyle = rank.color + '0.5)';
+    for (let g = 0; g < glowSize; g++) {
+      ctx.fillText(rank.label, meterX + (Math.random()-0.5)*2, meterY + (Math.random()-0.5)*2);
+    }
+
+    // Main text
+    ctx.globalAlpha = 0.8 + styleFlash * 0.2;
+    ctx.fillStyle = rank.color + '1)';
+    const displayLabel = isUK ? '>> ' + rank.label + ' <<' : rank.label;
+    ctx.fillText(displayLabel, meterX, meterY);
+
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'start';
+  }
+
   return aliveCount;
 }
 
@@ -2060,6 +2549,7 @@ function startPlayback(file) {
   audioEl.play().then(() => {
     isPlaying = true; isPaused = false;
     dropZone.classList.add('hidden');
+    setTimeout(() => speakLine(pickVoice(VOICE_LINES.boot)), 500);
   }).catch(e => showError('Play failed: ' + e.message));
 }
 
@@ -2088,7 +2578,7 @@ let pendingFile = null;
 
 function showModeChoice(file) {
   pendingFile = file;
-  dropZone.querySelector('div').innerHTML =
+  document.getElementById('drop-inner').innerHTML =
     `<div style="margin-bottom:20px;font-size:20px;letter-spacing:2px">MODE SELECT</div>` +
     `<button id="btn-realtime" class="mode-btn"><span class="label">&#9654; Real-time</span><span class="desc">Instant playback, reactive only</span></button>` +
     `<button id="btn-analyzed" class="mode-btn recommended"><span class="label">&#9889; Analyzed</span><span class="desc">Pre-scans track &middot; anticipation &middot; look-ahead</span></button>` +
@@ -2106,7 +2596,7 @@ function showModeChoice(file) {
 }
 
 function restoreDropZone() {
-  dropZone.querySelector('div').innerHTML =
+  document.getElementById('drop-inner').innerHTML =
     `DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small>`;
   // Re-attach click handler for file picker
   dropZone.onclick = dropZoneClick;
@@ -2263,117 +2753,311 @@ function frame(nowMs) {
   const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
   const time = t - t0;
 
-  // ── Impact system — hard kicks trigger distortion (gated by percussion confidence) ──
+  // ── Impact system — ULTRAKILL ──
   const kickDelta = bands.sub - prevKick;
-  if (kickDelta * percGate > 0.02 && kick > 0.6) {
-    impactIntensity = Math.min(1.0, kick * 1.2);
+  if (kickDelta * percGate > 0.005 && kick > 0.15) {
+    impactIntensity = Math.min(1.0, kick * 3.0);
   }
-  impactIntensity *= 0.85; // fast decay
+  // Hitlag trigger — hardest kicks freeze the frame
+  if (kickDelta * percGate > 0.01 && kick > 0.25 && hitlagFrames === 0) {
+    hitlagFrames = 2 + Math.floor(kick * 3);
+  }
+  impactIntensity *= 0.85;
 
-  // ── Evolution phase system — song-section aware ──
-  evoPhaseTimer += dt;
-  const section = energyHistory.section;
+  // Impulse shake — instant displacement + decay
+  if (kickDelta * percGate > 0.005) {
+    const intensity = kick * 0.15;
+    shakeX += (Math.random() - 0.5) * intensity;
+    shakeY += (Math.random() - 0.5) * intensity;
+  }
+  shakeX *= 0.82;
+  shakeY *= 0.82;
 
-  // Song section overrides: drops force phase change, breakdowns hold
-  if (section === 'drop' && energyHistory.prevSection !== 'drop') {
-    // DROP: force a phase change immediately
-    evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
-    evoPhaseTimer = 0;
-  } else if (section === 'breakdown') {
-    // Hold current phase during breakdowns — no timer advance
-  } else if (section === 'buildup') {
-    // Slow phase timer during buildups — build tension
-    evoPhaseTimer += dt * 0.3;
-  } else {
-    // Normal: timer + beat triggered
-    if (evoPhaseTimer > CFG.phaseDuration && (kickDelta * percGate > 0.01 || evoPhaseTimer > CFG.phaseDuration * 1.5)) {
-      evoPhaseTimer = 0;
-      evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
+  // FOV spring system
+  if (kickDelta * percGate > 0.005) {
+    fovTarget = FOV_BASE + kick * 1.5;
+  }
+  fovTarget += (FOV_BASE - fovTarget) * 2.0 * dt;
+  fovCurrent += (fovTarget - fovCurrent) * 5.0 * dt;
+
+  // Style meter shake
+  if (kickDelta * percGate > 0.005) {
+    styleShake += (Math.random() - 0.5) * kick * 8;
+    // Kick-triggered tech text
+    if (kick > 0.15 && Math.random() < 0.3) spawnTechText(energy, kick);
+    // SAM voice on kick at ULTRAKILL rank
+    if (kick > 0.2 && styleRank >= 5 && voiceCooldown <= 0 && Math.random() < 0.05) {
+      speakLine(pickVoice(VOICE_LINES.styleBonus));
+      voiceCooldown = 4.0;
+    }
+    // Style bonus text flash at BREAKCORE+
+    if (kick > 0.2 && styleRank >= 4 && Math.random() < 0.15) {
+      const bonuses = ['HEADSHOT','OVERKILL','PARRY','DISRESPECT','RICOSHOT',
+        'GROOVY','DOUBLE KILL','HOMERUN','CONDUCTOR','INSTAKILL'];
+      styleBonusText = bonuses[Math.floor(Math.random() * bonuses.length)];
+      styleBonusAlpha = 1.0;
     }
   }
+  styleShake *= 0.85;
+  styleBonusAlpha *= 0.92;
 
-  // Smooth lerp toward current phase targets
-  const target = CFG.evoPhases[evoPhaseIdx];
+  // ULTRAKILL red particles — rate scales with rank
+  const redRate = styleRank >= 5 ? 0.3 : styleRank >= 4 ? 0.15 : 0.05;
+  if (energy > 0.15 && Math.random() < redRate) {
+    const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+    const a = Math.random() * Math.PI * 2;
+    spawnOne(cx + Math.cos(a)*10, cy + Math.sin(a)*10, Math.cos(a)*400, Math.sin(a)*400, -1, 6, 0.8, 300);
+  }
+
+  const section = energyHistory.section;
+
+  // ── Audio-driven evolution (replaces phase system) ──
+  const evoTarget = {
+    repPeriod:  4.0 + (1.0 - energy) * 6.0,
+    fogDensity: 0.03 + chaos * 0.05,
+    speedMul:   0.5 + energy * 1.5,
+    objScale:   0.5 + energy * 0.5 + kick * 0.2,
+    corridorR:  2.5 + (1.0 - energy) * 2.0,
+  };
   const evoLerp = 2.0 * dt;
-  evoSmooth.repPeriod += (target.repPeriod - evoSmooth.repPeriod) * evoLerp;
-  evoSmooth.fogDensity += (target.fogDensity - evoSmooth.fogDensity) * evoLerp;
-  evoSmooth.speedMul += (target.speedMul - evoSmooth.speedMul) * evoLerp;
-  evoSmooth.tunnelBlend += (target.tunnelBlend - evoSmooth.tunnelBlend) * evoLerp;
-  evoSmooth.objScale += (target.objScale - evoSmooth.objScale) * evoLerp;
-  evoSmooth.colorGrade += (target.colorGrade - evoSmooth.colorGrade) * evoLerp;
+  evoSmooth.repPeriod += (evoTarget.repPeriod - evoSmooth.repPeriod) * evoLerp;
+  evoSmooth.fogDensity += (evoTarget.fogDensity - evoSmooth.fogDensity) * evoLerp;
+  evoSmooth.speedMul += (evoTarget.speedMul - evoSmooth.speedMul) * evoLerp;
+  evoSmooth.objScale += (evoTarget.objScale - evoSmooth.objScale) * evoLerp;
+  evoSmooth.corridorR += (evoTarget.corridorR - evoSmooth.corridorR) * evoLerp;
+
+  // Audio-driven shape params
+  const shapeTarget = {
+    symmetry: 3.0 + (spectralCentroid / 4000) * 5.0,
+    spike: Math.min(1, kick * 1.5),
+    fracture: Math.min(1, chaos * 1.2),
+    twist: Math.min(1, (hat + energy) * 0.6),
+    hollow: Math.min(1, snare * 0.8),
+    angular: Math.min(1, (transientScore + spectralFlatness) * 0.7),
+  };
+  const shapeLerp = 3.0 * dt;
+  for (const k in shapeParams) shapeParams[k] += (shapeTarget[k] - shapeParams[k]) * shapeLerp;
 
   // Song section visual modulation
   let sectionSpeedMul = 1.0;
   let sectionFogMul = 1.0;
   if (section === 'breakdown') {
-    sectionSpeedMul = 0.3; // crawl speed
-    sectionFogMul = 0.5;   // clear fog — see deep into space
+    sectionSpeedMul = 0.3;
+    sectionFogMul = 0.5;
   } else if (section === 'buildup') {
-    sectionSpeedMul = 0.6 + energyHistory.trendDuration * 0.15; // gradually accelerate
-    sectionFogMul = 0.8 + energyHistory.trendDuration * 0.05;   // minimal fog increase
+    sectionSpeedMul = 0.6 + energyHistory.trendDuration * 0.15;
+    sectionFogMul = 0.8 + energyHistory.trendDuration * 0.05;
   } else if (section === 'drop') {
-    sectionSpeedMul = 3.5; // blast forward hard
-    sectionFogMul = 0.5;   // clear for impact — see everything
+    sectionSpeedMul = 3.5;
+    sectionFogMul = 0.5;
   }
 
-  // Look-ahead anticipation effects (Phase 2C) — only when offline data available
   const ant = lookAhead.anticipation;
   if (ant > 0.01) {
-    // Camera accelerates before drops — subtle ramp
     sectionSpeedMul += ant * 0.8;
-    // Fog clears in anticipation — opens up the view
     sectionFogMul *= 1.0 - ant * 0.4;
+  }
+
+  // ── Spawn Pool Audio Triggers ──
+  for (const k in spawnCooldowns) spawnCooldowns[k] = Math.max(0, spawnCooldowns[k] - dt);
+
+  if (kickDelta * percGate > 0.005 && kick > 0.12 && spawnCooldowns.kick <= 0) {
+    spawnCooldowns.kick = 0.4;
+    const r = Math.random();
+    if (r < 0.35) spawnObject(1, 8 + Math.random()*15, 3.0, 0.8 + Math.random()*0.5, 4 + Math.random()*4);
+    else if (r < 0.55) spawnObject(10, 5 + Math.random()*8, 2.5, 0.6, 2 + Math.random()*2); // sawblade
+    else if (r < 0.75) spawnObject(2, 5 + Math.random()*8, 2.5, 0.5 + Math.random()*0.3, 2 + Math.random()*2);
+    else spawnObject(6, 3 + Math.random()*5, 2.0, 0.2, 1 + Math.random()*2);
+  }
+  if (bands.low - prevSnare > 0.008 && spawnCooldowns.snare <= 0) {
+    spawnCooldowns.snare = 0.25;
+    for (let i = 0; i < 2; i++) spawnObject(6, 3 + Math.random()*6, 2.5, 0.15 + Math.random()*0.1, 1 + Math.random()*2);
+    if (Math.random() < 0.3) spawnObject(12, 4 + Math.random()*6, 2.0, 0.4, 1.5 + Math.random()*1.5); // coin
+    else if (Math.random() < 0.3) spawnObject(7, 6 + Math.random()*10, 3.0, 1.2, 3 + Math.random()*3);
+  }
+  if (chaos > 0.3 && spawnCooldowns.hat <= 0) {
+    spawnCooldowns.hat = 0.8;
+    const r = Math.random();
+    if (r < 0.25) spawnObject(7, 8 + Math.random()*12, 3.5, 1.0, 3 + Math.random()*3);
+    else if (r < 0.5) spawnObject(8, 6 + Math.random()*10, 3.0, 0.8, 3 + Math.random()*3); // gear
+    else if (r < 0.7) spawnObject(10, 5 + Math.random()*8, 2.5, 0.7, 2 + Math.random()*2); // sawblade
+    else spawnObject(1, 10 + Math.random()*15, 3.5, 0.6, 4 + Math.random()*4);
+  }
+  if (section === 'drop' && energyHistory.prevSection !== 'drop' && spawnCooldowns.drop <= 0) {
+    spawnCooldowns.drop = 6.0;
+    spawnObject(3, 20 + Math.random()*20, 4.0, 2.5, 8 + Math.random()*7);
+    spawnObject(13, 25 + Math.random()*15, 4.5, 1.5, 6 + Math.random()*4); // railgun
+    spawnObject(5, 30 + Math.random()*20, 5.0, 2.0, 10 + Math.random()*10);
+  }
+  if (section === 'breakdown' && energyHistory.prevSection !== 'breakdown' && spawnCooldowns.breakdown <= 0) {
+    spawnCooldowns.breakdown = 8.0;
+    if (Math.random() < 0.7) spawnObject(5, 35 + Math.random()*15, 5.0, 2.5, 12 + Math.random()*8);
+    else spawnObject(4, 10 + Math.random()*10, 3.5, 1.5, 3 + Math.random()*2);
+  }
+  if (energy > 0.2 && spawnCooldowns.sustained <= 0) {
+    spawnCooldowns.sustained = 1.5;
+    const r = Math.random();
+    if (r < 0.25) { spawnObject(2, 5 + Math.random()*8, 3.0, 0.5, 2 + Math.random()*2); spawnObject(2, 5 + Math.random()*8, 3.0, 0.5, 2 + Math.random()*2); }
+    else if (r < 0.45) spawnObject(11, 8 + Math.random()*10, 3.0, 0.8, 4 + Math.random()*3); // piston
+    else if (r < 0.65) spawnObject(1, 10 + Math.random()*15, 3.5, 0.7, 4 + Math.random()*4);
+    else spawnObject(3, 15 + Math.random()*20, 4.0, 2.0, 8 + Math.random()*7);
+  }
+  // Ambient spawning — scene is never empty
+  if (spawnCooldowns.ambient <= 0) {
+    const activeCount = spawnPool.filter(s => s.active).length;
+    if (activeCount < 5) {
+      spawnCooldowns.ambient = 1.2 + Math.random() * 0.8;
+      const r = Math.random();
+      if (r < 0.12) spawnObject(5, 25 + Math.random()*25, 5.0, 1.5 + Math.random(), 10 + Math.random()*10); // monolith
+      else if (r < 0.22) spawnObject(7, 10 + Math.random()*15, 3.5, 1.0, 4 + Math.random()*4); // energy ring
+      else if (r < 0.32) spawnObject(2, 8 + Math.random()*12, 3.0, 0.6, 3 + Math.random()*3); // cross blade
+      else if (r < 0.42) spawnObject(4, 15 + Math.random()*15, 4.0, 1.5, 5 + Math.random()*5); // void frame
+      else if (r < 0.52) spawnObject(8, 8 + Math.random()*12, 3.0, 0.8, 4 + Math.random()*3); // gear
+      else if (r < 0.62) spawnObject(9, 20 + Math.random()*20, 4.0, 1.2, 8 + Math.random()*6); // antenna
+      else if (r < 0.72) spawnObject(11, 10 + Math.random()*12, 3.0, 0.8, 5 + Math.random()*4); // piston
+      else if (r < 0.82) spawnObject(10, 6 + Math.random()*10, 3.0, 0.6, 3 + Math.random()*3); // sawblade
+      else if (r < 0.92) spawnObject(13, 15 + Math.random()*15, 4.0, 1.0, 6 + Math.random()*4); // railgun
+      else spawnObject(14, 20 + Math.random()*20, 4.5, 1.0, 8 + Math.random()*6); // skull (rare)
+    }
+  }
+
+  // Spawn pool lifecycle
+  for (const s of spawnPool) {
+    if (!s.active) continue;
+    s.age += dt;
+    s.life = s.age / s.maxLife;
+    if (s.life >= 1.0 || s.z < cameraZ - 10) {
+      s.active = false;
+    }
+  }
+
+  // Post-BH rebuild queue
+  for (let i = rebuildQueue.length - 1; i >= 0; i--) {
+    rebuildQueue[i].delay -= dt;
+    if (rebuildQueue[i].delay <= 0) {
+      const q = rebuildQueue[i];
+      spawnObject(q.type, q.zAhead, q.xyR, q.scale, q.maxLife);
+      rebuildQueue.splice(i, 1);
+    }
+  }
+
+  // ── Hitlag check — freeze scene but still render ──
+  if (hitlagFrames > 0) {
+    hitlagFrames--;
+    // Pixelation during hitlag
+    const newFactor = 0.25;
+    if (Math.abs(sceneResFactor - newFactor) > 0.01) {
+      sceneResFactor = newFactor;
+      rebuildFBs(true);
+    }
+    // Still render the frozen frame, just don't advance anything else
+    renderFrame(dt, time, energy, kick, snare, hat, chaos, section, sectionFogMul, ant);
+    return;
+  } else {
+    const newFactor = 0.5;
+    if (Math.abs(sceneResFactor - newFactor) > 0.01) {
+      sceneResFactor = newFactor;
+      rebuildFBs(true);
+    }
   }
 
   // ── Forward camera ──
   const forwardSpeed = (CFG.camBaseSpeed + energy * CFG.camBoostSpeed + kick * 6.0) * evoSmooth.speedMul * sectionSpeedMul;
   cameraZ += forwardSpeed * dt;
-  if (kickDelta * percGate > 0.015) {
+  if (kickDelta * percGate > 0.005) {
     cameraZ += CFG.camKickImpulse * (section === 'drop' ? 3.0 : 1.0);
   }
   cameraSpeed = forwardSpeed;
-  // Camera XY drift (must match shader formula)
-  const mOff = [(smoothMouseX - 0.5) * 2, (smoothMouseY - 0.5) * 2];
-  const camDriftX = 0.0;
-  const camDriftY = 0.0;
 
-  // Black hole: you approach it, pass through, new one spawns further ahead
+  // Camera XY drift — reduced (Part 1D)
+  const mOff = [(smoothMouseX - 0.5) * 0.8, (smoothMouseY - 0.5) * 0.6];
+  const driftAmp = 0.5 + energy * 1.0;
+  const camDriftX = Math.sin(time * 0.15) * driftAmp * 0.3 + mOff[0] + shakeX;
+  const camDriftY = Math.cos(time * 0.12) * driftAmp * 0.25 + mOff[1] + shakeY;
+
+  // Black hole
   const bhDist = bhWorldZ - cameraZ;
   if (bhDist < 1.0) {
+    hitlagFrames = 6; // BH pass hitlag
     bhPassFlash = 1.0;
     bhWorldZ = cameraZ + 50.0 + Math.random() * 40.0;
-    // Trigger evolution phase change on passage
-    evoPhaseIdx = (evoPhaseIdx + 1) % CFG.evoPhases.length;
-    evoPhaseTimer = 0;
+    // BH pass tech text burst + voice
+    for (let i = 0; i < 4; i++) spawnTechText(1, 1);
+    if (voiceCooldown <= 0) { speakLine(pickVoice(VOICE_LINES.bhPass)); voiceCooldown = 4.0; }
+    // Post-pass rebuild sequence
+    rebuildQueue.length = 0;
+    rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 5, xyR: 3.0, scale: 1.5, maxLife: 3 });
+    rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 8, xyR: 3.5, scale: 1.5, maxLife: 3 });
+    rebuildQueue.push({ delay: 0.3, type: 6, zAhead: 4, xyR: 2.5, scale: 0.15, maxLife: 2 });
+    rebuildQueue.push({ delay: 0.3, type: 6, zAhead: 6, xyR: 2.5, scale: 0.15, maxLife: 2 });
+    rebuildQueue.push({ delay: 0.6, type: 7, zAhead: 10, xyR: 3.5, scale: 1.2, maxLife: 4 });
+    rebuildQueue.push({ delay: 1.0, type: 14, zAhead: 12, xyR: 4.0, scale: 1.0, maxLife: 6 }); // skull on BH pass
+    rebuildQueue.push({ delay: 1.0, type: 1, zAhead: 15, xyR: 3.5, scale: 0.8, maxLife: 5 });
+    rebuildQueue.push({ delay: 1.5, type: 5, zAhead: 30, xyR: 5.0, scale: 2.0, maxLife: 12 });
+    rebuildQueue.push({ delay: 2.0, type: 3, zAhead: 25, xyR: 4.5, scale: 2.5, maxLife: 10 });
+    rebuildQueue.push({ delay: 2.5, type: 1, zAhead: 18, xyR: 4.0, scale: 0.7, maxLife: 5 });
   }
-  bhPassFlash *= (bhPassFlash > 0.5) ? 0.96 : 0.92;
+  bhPassFlash *= (bhPassFlash > 0.5) ? 0.92 : 0.88;
 
-  // BH grows as you approach — no hard cap, should feel massive up close
-  // Anticipation: BH looms larger before drops (perceived drift closer)
   const bhApproachFactor = Math.max(0.15, 15.0 / Math.max(bhDist, 0.5));
   const bhZ = bhWorldZ;
   const bhSize = (2.0 + energy * 1.2 + kick * 0.8 + ant * 1.5) * Math.min(bhApproachFactor, 4.0);
 
-  // ── Shape morphing ──
-  shapeTimer += dt;
-  if (!isMorphing && shapeTimer > CFG.shapeDuration) {
-    isMorphing = true;
-    shapeTimer = 0;
-    nextShape = (currentShape + 1) % CFG.numShapes;
+  // ── Style Meter Update ──
+  smoothStyleEnergy += (energy - smoothStyleEnergy) * 2.0 * dt;
+  let newRank = 0;
+  for (let i = STYLE_RANKS.length - 1; i >= 0; i--) {
+    if (smoothStyleEnergy >= STYLE_RANKS[i].threshold) { newRank = i; break; }
   }
-  if (isMorphing) {
-    morphProgress = Math.min(1, shapeTimer / CFG.morphDuration);
-    morphProgress = morphProgress * morphProgress * (3 - 2 * morphProgress);
-    if (shapeTimer > CFG.morphDuration) {
-      currentShape = nextShape;
-      nextShape = (currentShape + 1) % CFG.numShapes;
-      morphProgress = 0;
-      isMorphing = false;
-      shapeTimer = 0;
+  if (newRank > styleRank) {
+    styleFlash = 1.0;
+    prevStyleRank = styleRank;
+    // Voice on rank-up
+    if (voiceCooldown <= 0) {
+      const pool = newRank >= 5 ? VOICE_LINES.ultrakill : VOICE_LINES.rankUp;
+      speakLine(pickVoice(pool));
+      voiceCooldown = 4.0;
+    }
+    styleRank = newRank;
+    styleSustainTime = 0;
+    // Rank-up tech text burst + shock ring
+    for (let i = 0; i < 3; i++) spawnTechText(energy, kick);
+    spawnRing(0);
+  } else if (newRank < styleRank) {
+    styleSustainTime += dt;
+    if (styleSustainTime > 2.5) { styleRank = Math.max(newRank, styleRank - 1); styleSustainTime = 0; }
+  } else {
+    styleSustainTime = 0;
+  }
+  styleFlash *= 0.9;
+
+  // ── Voiceover triggers ──
+  voiceCooldown = Math.max(0, voiceCooldown - dt);
+  if (voiceCooldown <= 0 && isPlaying && voiceSynth) {
+    if (section === 'breakdown' && energy < 0.05 && Math.random() < 0.008) {
+      speakLine(pickVoice(VOICE_LINES.breakdown));
+      voiceCooldown = 6 + Math.random() * 4;
+    } else if (energy < 0.04 && Math.random() < 0.005) {
+      speakLine(pickVoice(VOICE_LINES.idle));
+      voiceCooldown = 8 + Math.random() * 5;
     }
   }
 
-  // ── Pass 1: Scene (half res) ──
+  // ── Telemetry sampling ──
+  telemetryTime += dt;
+  telemetryTimer += dt;
+  if (telemetryTimer >= TELEMETRY_INTERVAL) {
+    telemetryTimer -= TELEMETRY_INTERVAL;
+    const activeSpawns = spawnPool.filter(s => s.active).length;
+    recordTelemetry(energy, kick, snare, hat, chaos, section, styleRank, activeSpawns, fovCurrent, cameraSpeed);
+  }
+
+  renderFrame(dt, time, energy, kick, snare, hat, chaos, section, sectionFogMul, ant);
+}
+
+function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, sectionFogMul, ant) {
+  // ── Pass 1: Scene ──
+  rebuildFBs();
   gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFB.fb);
   gl.viewport(0, 0, sceneW, sceneH);
   gl.useProgram(sceneProg);
@@ -2383,24 +3067,36 @@ function frame(nowMs) {
   gl.uniform1f(sceneU.uSnare, snare);
   gl.uniform1f(sceneU.uHat, hat);
   gl.uniform1f(sceneU.uChaos, chaos);
-  gl.uniform1f(sceneU.uHue, hue);
-  gl.uniform2f(sceneU.uMouse, smoothMouseX, smoothMouseY);
+  gl.uniform1f(sceneU.uFOV, fovCurrent);
   gl.uniform1f(sceneU.uCamZ, cameraZ);
-  gl.uniform1f(sceneU.uTunnelBlend, evoSmooth.tunnelBlend);
   gl.uniform1f(sceneU.uFogDensity, evoSmooth.fogDensity * sectionFogMul);
   gl.uniform1f(sceneU.uRepPeriod, evoSmooth.repPeriod);
   gl.uniform1f(sceneU.uObjScale, evoSmooth.objScale);
-  gl.uniform2f(sceneU.uCamXY, camDriftX, camDriftY);
-  gl.uniform1f(sceneU.uCorridorR, CFG.corridorRadius);
-  gl.uniform1f(sceneU.uBHZ, bhZ);
-  gl.uniform1f(sceneU.uBHSize, bhSize);
-  gl.uniform1f(sceneU.uMorph, morphProgress);
-  gl.uniform1i(sceneU.uShapeA, currentShape);
-  gl.uniform1i(sceneU.uShapeB, nextShape);
+  const mOff = [(smoothMouseX - 0.5) * 0.8, (smoothMouseY - 0.5) * 0.6];
+  const driftAmp = 0.5 + energy * 1.0;
+  gl.uniform2f(sceneU.uCamXY,
+    Math.sin(time * 0.15) * driftAmp * 0.3 + mOff[0] + shakeX,
+    Math.cos(time * 0.12) * driftAmp * 0.25 + mOff[1] + shakeY
+  );
+  gl.uniform1f(sceneU.uCorridorR, evoSmooth.corridorR);
+  gl.uniform1f(sceneU.uBHZ, bhWorldZ);
+  gl.uniform1f(sceneU.uBHSize, (2.0 + energy * 1.2 + kick * 0.8 + ant * 1.5) * Math.min(Math.max(0.15, 15.0 / Math.max(bhWorldZ - cameraZ, 0.5)), 4.0));
+  gl.uniform3f(sceneU.uShapeA, shapeParams.symmetry, shapeParams.spike, shapeParams.fracture);
+  gl.uniform3f(sceneU.uShapeB, shapeParams.twist, shapeParams.hollow, shapeParams.angular);
   gl.uniform2f(sceneU.uRes, sceneW, sceneH);
+
+  // Upload spawn pool uniforms
+  for (let i = 0; i < POOL_SIZE; i++) {
+    const s = spawnPool[i];
+    const aLoc = sceneU[`uSpawnA[${i}]`];
+    const bLoc = sceneU[`uSpawnB[${i}]`];
+    if (aLoc) gl.uniform4f(aLoc, s.x, s.y, s.z, s.active ? s.type : 0);
+    if (bLoc) gl.uniform4f(bLoc, s.scale, s.life, s.rotSeed, 0);
+  }
+
   drawFullscreenTriangle();
 
-  // ── Pass 2: Post-processing (full res) ──
+  // ── Pass 2: Post-processing ──
   const src = ppFB[ppIdx], dst = ppFB[1 - ppIdx];
   gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
   gl.viewport(0, 0, screenW, screenH);
@@ -2411,7 +3107,6 @@ function frame(nowMs) {
   gl.uniform1f(postU.uEnergy, energy);
   gl.uniform1f(postU.uKick, kick);
   gl.uniform1f(postU.uChaos, chaos);
-  gl.uniform1f(postU.uPhase, evoSmooth.colorGrade);
   gl.uniform1f(postU.uCamSpeed, cameraSpeed);
   gl.uniform1f(postU.uImpact, impactIntensity);
   gl.uniform1f(postU.uFlash, bhPassFlash);
@@ -2428,6 +3123,7 @@ function frame(nowMs) {
 
   // Canvas 2D overlay
   const W = window.innerWidth, H = window.innerHeight;
+  const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
   const aliveP = drawOverlay(dt, W, H, energy, kick, hue, section);
 
   // HUD
@@ -2437,17 +3133,14 @@ function frame(nowMs) {
     document.getElementById('hud-res').textContent = `GL:${screenW}x${screenH} Scene:${sceneW}x${sceneH} DPR:${Math.min(window.devicePixelRatio, 2).toFixed(1)}`;
     document.getElementById('hud-energy').textContent = 'Energy: ' + energy.toFixed(2);
     document.getElementById('hud-chaos').textContent = 'Chaos: ' + chaos.toFixed(2);
-    document.getElementById('hud-band').textContent = `K:${kick.toFixed(2)} S:${snare.toFixed(2)} H:${hat.toFixed(2)} FL:${spectralFlux.toFixed(2)} FT:${spectralFlatness.toFixed(2)} TR:${transientScore.toFixed(2)} PG:${percGate.toFixed(2)}`;
-    const shapeNames = ['protein','crystal','jellyfish','blackhole'];
-    const phaseNames = CFG.evoPhases.map((_,i) => `P${i}`);
-    let extraInfo = `P:${aliveP}/${CFG.maxParticles} Z:${cameraZ.toFixed(0)} Spd:${cameraSpeed.toFixed(1)} Phase:${phaseNames[evoPhaseIdx]} Shape:${shapeNames[currentShape]}${isMorphing?'→'+shapeNames[nextShape]:''} [${section.toUpperCase()}]`;
+    document.getElementById('hud-band').textContent = `K:${kick.toFixed(2)} S:${snare.toFixed(2)} H:${hat.toFixed(2)} PG:${percGateState.toFixed(2)}`;
+    const activeSpawns = spawnPool.filter(s => s.active).length;
+    let extraInfo = `P:${aliveP}/${CFG.maxParticles} Z:${cameraZ.toFixed(0)} Spd:${cameraSpeed.toFixed(1)} Spawns:${activeSpawns} Style:${STYLE_RANKS[styleRank].label} [${section.toUpperCase()}]`;
     if (offlineMode && offlineSections) {
       const f = getOfflineFrame();
       if (f >= 0) {
         const ttd = offlineSections.timeToNextDrop[f];
-        const tsd = offlineSections.timeSinceLastDrop[f];
-        const sp = offlineSections.sectionProgress[f];
-        extraInfo += ` | DROP:${ttd < 100 ? ttd.toFixed(1)+'s' : '--'} BPM:${offlineSections.bpm} SP:${sp.toFixed(2)} ANT:${lookAhead.anticipation.toFixed(2)} BP:${lookAhead.beatPhase.toFixed(2)}`;
+        extraInfo += ` | DROP:${ttd < 100 ? ttd.toFixed(1)+'s' : '--'} BPM:${offlineSections.bpm} ANT:${lookAhead.anticipation.toFixed(2)}`;
       }
     }
     extraInfo += offlineMode ? ' [ANALYZED]' : ' [REALTIME]';
@@ -2456,7 +3149,7 @@ function frame(nowMs) {
 }
 
 requestAnimationFrame(frame);
-console.log('Breakcore Visualizer v6.0 — Look-Ahead + Anticipation — WebGL2 + GLSL + Canvas 2D overlay');
+console.log('Breakcore Visualizer v9.0 — ULTRAKILL Impact + Spawn Pool + Monochrome — WebGL2');
 </script>
 </body>
 </html>
