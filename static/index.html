@@ -19,6 +19,9 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 #drop-zone div{color:#0f0;font:24px 'Courier New',monospace;border:2px dashed rgba(0,255,0,.4);
   padding:60px 80px;text-align:center}
 #drop-zone div small{display:block;margin-top:8px;font-size:13px;color:rgba(0,255,0,.5)}
+#drop-inner{text-align:left;font-size:14px;line-height:1.6}
+.boot-cursor{animation:blink .5s step-end infinite}
+@keyframes blink{50%{opacity:0}}
 .mode-btn{font:18px 'Courier New',monospace;color:#0f0;background:rgba(0,255,0,.08);
   border:1px solid rgba(0,255,0,.4);padding:14px 32px;cursor:pointer;margin:8px;
   transition:all .2s;position:relative;overflow:hidden}
@@ -39,6 +42,7 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 #analyze-overlay .bar-fill{height:100%;background:#0f0;width:0%;transition:width .15s}
 #analyze-overlay .status{margin-top:10px;font-size:12px;color:rgba(0,255,0,.6)}
 </style>
+<script src="https://unpkg.com/sam-js@0.3.1"></script>
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -51,7 +55,44 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
   <div id="hud-band">K:0 S:0 H:0</div>
   <div id="hud-extra">P: 0</div>
 </div>
-<div id="drop-zone"><div>DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small></div></div>
+<div id="drop-zone"><div id="drop-inner"></div></div>
+<script>
+(function() {
+  const bootLines = [
+    'BOOT UP SEQUENCE... READY',
+    'FIRMWARE: V1.0.0',
+    'CALIBRATION: COMPLETE',
+    'AUDIO: OK',
+    'VIDEO: OK',
+    'MECHANICS: OK',
+    'ALL SYSTEMS OPERATIONAL',
+    '',
+    'MACHINE ID: V1',
+    'LOCATION: APPROACHING HELL',
+    '',
+  ];
+  const finalLine = 'MANKIND IS DEAD. BLOOD IS FUEL. HELL IS FULL.';
+  const dropInner = document.getElementById('drop-inner');
+  let html = '';
+  let lineIdx = 0;
+  function addLine() {
+    if (lineIdx < bootLines.length) {
+      const line = bootLines[lineIdx];
+      html += (line ? line : '&nbsp;') + '<br>';
+      dropInner.innerHTML = html + '<span class="boot-cursor">_</span>';
+      lineIdx++;
+      setTimeout(addLine, 80 + Math.random() * 60);
+    } else {
+      // Final line in red
+      html += '<span style="color:#ff3c28;font-weight:bold">' + finalLine + '</span><br><br>';
+      html += 'DROP AUDIO HERE<br>';
+      html += '<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small>';
+      dropInner.innerHTML = html;
+    }
+  }
+  setTimeout(addLine, 400);
+})();
+</script>
 <div id="analyze-overlay" class="hidden">
   <div class="inner">
     <div id="analyze-label">ANALYZING AUDIO...</div>
@@ -73,12 +114,12 @@ const CFG = {
   bandMultipliers: { kick: 3, snare: 2.5, hat: 4 },
 
   // Particles
-  maxParticles: 1200,
+  maxParticles: 2000,
   spawn: {
-    kick:  { count: [40, 70], speed: [250, 700], size: [5, 11], life: [0.8, 1.5], gravity: 500 },
-    snare: { count: [30, 50], speed: [300, 750], size: [3, 6], life: [0.4, 0.8], gravity: 250 },
-    hat:   { count: [35, 55], speed: [400, 950], size: [2, 4], life: [0.2, 0.5], gravity: 0 },
-    peak:  { count: [60, 100], speed: [350, 1000], size: [4, 9], life: [0.6, 1.3], gravity: 350 },
+    kick:  { count: [80, 140], speed: [250, 700], size: [5, 11], life: [0.8, 1.5], gravity: 500 },
+    snare: { count: [60, 100], speed: [300, 750], size: [3, 6], life: [0.4, 0.8], gravity: 250 },
+    hat:   { count: [70, 110], speed: [400, 950], size: [2, 4], life: [0.2, 0.5], gravity: 0 },
+    peak:  { count: [120, 200], speed: [350, 1000], size: [4, 9], life: [0.6, 1.3], gravity: 350 },
   },
   onsetThresholds: { kick: 0.015, snare: 0.012, hat: 0.008, peak: 0.03 },
   peakEnergyMin: 0.6,
@@ -86,7 +127,7 @@ const CFG = {
   // Overlay
   numBars: 64,
   numStars: 400,
-  maxRings: 12,
+  maxRings: 16,
   maxTears: 30,
   // Forward camera
   camBaseSpeed: 6.0,
@@ -96,7 +137,7 @@ const CFG = {
 
   // Shader tuning
   scene: {
-    steps: 44, maxDist: 30.0, surfThreshold: 0.022,
+    steps: 56, maxDist: 30.0, surfThreshold: 0.022,
   },
   post: {
     bloomThreshold: 0.5, bloomIntensity: 1.2, bloomKickBoost: 0.25,
@@ -360,7 +401,7 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
     localP.xy *= rot2(spinFast * 2.0);
     vec3 ap2 = abs(localP);
     d = (ap2.x + ap2.y + ap2.z - 0.5) * 0.577;
-  } else {
+  } else if (stype < 7.5) {
     // Type 7: Energy ring — thin spinning torus, mechanical feel
     localP.xy *= rot2(spinSlow * 1.5);
     float torusR = 1.5 + uKick * 0.3;
@@ -385,7 +426,7 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
     // Center axle
     float axle = length(localP) - 0.15;
     d = min(d, axle);
-  } else {
+  } else if (stype < 9.5) {
     // Type 9: Antenna array — central mast + radiating arms
     float mast = max(abs(localP.x) - 0.06, abs(localP.z) - 0.06);
     mast = max(mast, abs(localP.y) - 2.0);
@@ -399,6 +440,60 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
     float tip3 = length(armP - vec3(0,0,1.5)) - 0.1;
     float tip4 = length(armP - vec3(0,0,-1.5)) - 0.1;
     d = min(d, min(min(tip1,tip2), min(tip3,tip4)));
+  } else if (stype < 10.5) {
+    // Type 10: Sawblade — spinning notched disc
+    localP.xz *= rot2(spinFast * 4.0);
+    float sbR = length(localP.xz);
+    float disc = max(abs(localP.y) - 0.06, sbR - 1.8);
+    float notch = abs(sin(atan(localP.z, localP.x) * 8.0)) - 0.3;
+    disc = max(disc, -max(notch, -(sbR - 1.4)));
+    float hub = length(localP) - 0.25;
+    d = min(disc, hub);
+  } else if (stype < 11.5) {
+    // Type 11: Piston — cylinder with pumping rod
+    localP.xz *= rot2(spinSlow);
+    float cyl = max(length(localP.xz) - 0.4, abs(localP.y) - 1.5);
+    float rod = max(length(localP.xz) - 0.15, abs(localP.y - 0.8 - sin(tw * 2.0) * 0.6) - 0.8);
+    d = min(cyl, rod);
+    float flange = max(length(localP.xz) - 0.6, abs(localP.y) - 0.08);
+    d = min(d, flange);
+  } else if (stype < 12.5) {
+    // Type 12: Coin — spinning disc on edge
+    localP.xy *= rot2(spinFast * 5.0);
+    float coinR = length(localP.xy);
+    d = max(coinR - 1.0, abs(localP.z) - 0.08);
+    float rim = max(abs(coinR - 0.95) - 0.03, abs(localP.z) - 0.12);
+    d = min(d, rim);
+    d = max(d, -(coinR - 0.3) + 0.05);
+  } else if (stype < 13.5) {
+    // Type 13: Railgun barrel — long cylinder with coil rings
+    localP.yz *= rot2(spinSlow * 0.5);
+    float barrel = max(length(localP.xz) - 0.12, abs(localP.y) - 3.0);
+    d = barrel;
+    float ringY = mod(localP.y + tw * 0.5, 0.8) - 0.4;
+    float coil = max(length(localP.xz) - 0.3, abs(ringY) - 0.06);
+    d = min(d, coil);
+    float muzzle = length(localP - vec3(0, 3.0, 0)) - 0.25;
+    d = min(d, muzzle);
+  } else if (stype < 14.5) {
+    // Type 14: Skull fragment — V1 mechanical skull
+    localP.xz *= rot2(spinSlow * 0.3);
+    vec3 sp = localP; sp.y *= 0.7;
+    float skull = length(sp) - 1.0;
+    float eyeL = length(localP - vec3(-0.35, 0.15, -0.8)) - 0.25;
+    float eyeR = length(localP - vec3(0.35, 0.15, -0.8)) - 0.25;
+    skull = max(skull, -min(eyeL, eyeR));
+    vec3 jp = localP - vec3(0, -0.6, -0.4);
+    float jaw = max(abs(jp.x) - 0.5, max(abs(jp.y) - 0.25, abs(jp.z) - 0.4));
+    d = min(skull, jaw);
+    d = max(d, -(length(sp) - 0.85));
+  } else {
+    // Type 15: Hero cube — large Crimson Desert cube, energy-reactive spin
+    float rotSpeed = 0.3 + uEnergy * 5.0 + uKick * 10.0;
+    localP.xy *= rot2(uTime * rotSpeed       + tw * 0.8);
+    localP.xz *= rot2(uTime * rotSpeed * 0.6 + tw * 1.3);
+    vec3 q = abs(localP) - vec3(1.0);
+    d = length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
   }
 
   d += 0.01 * sin(localP.x*12.0+tw) * sin(localP.y*12.0) * sin(localP.z*12.0) * uEnergy;
@@ -406,9 +501,48 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
   return d * sc * envelope;
 }
 
+// ── Crimson Desert Cube Field ──
+float cubefieldSDF(vec3 p) {
+  float minD = 999.0;
+  float period = 3.0;
+  float cellZ = floor((p.z + period * 0.5) / period);
+
+  for (int iz = -1; iz <= 1; iz++) {
+    float cz = cellZ + float(iz);
+    float pz = p.z - cz * period;
+
+    for (int ic = 0; ic < 8; ic++) {
+      float fi = float(ic);
+      float h1 = fract(sin(dot(vec2(cz, fi),           vec2(127.1, 311.7))) * 43758.5);
+      float h2 = fract(sin(dot(vec2(cz + 10.0, fi),    vec2(269.5, 183.3))) * 43758.5);
+      float h3 = fract(sin(dot(vec2(cz + 20.0, fi),    vec2(113.5, 271.9))) * 43758.5);
+
+      float angle  = (fi / 8.0) * 6.283 + h1 * 0.9;
+      float radius = 3.2 + h2 * 4.8;
+      float cubeX  = cos(angle) * radius;
+      float cubeY  = sin(angle) * radius;
+      float yOff   = (h3 - 0.5) * 1.8;
+      float zOff   = (h1 - 0.5) * 2.0;
+
+      vec3 localP = p - vec3(cubeX, cubeY + yOff, cz * period + zOff);
+
+      float rotSpeed = (0.4 + uEnergy * 3.5 + uKick * 6.0) * (0.5 + h3 * 0.8);
+      localP.xy *= rot2(uTime * rotSpeed          + h1 * 6.283);
+      localP.xz *= rot2(uTime * rotSpeed * 0.65   + h2 * 6.283);
+
+      float sc  = 0.10 + h1 * 0.24;
+      vec3 q    = abs(localP) - vec3(sc);
+      float d   = length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+      minD = min(minD, d);
+    }
+  }
+  return minD;
+}
+
 // ── Combined Scene ──
 float sceneSDF(vec3 p) {
   float d = min(tunnelWallSDF(p), attractorSDF(p));
+  d = min(d, cubefieldSDF(p));
   for (int i = 0; i < 14; i++) {
     d = min(d, spawnSDF(p, uSpawnA[i], uSpawnB[i]));
   }
@@ -459,7 +593,7 @@ void main() {
     minDist = min(minDist, abs(d));
 
     // Volumetric glow — objects emit light proportional to proximity
-    glowAccum += exp(-abs(d) * 4.0) * 0.015 * (0.4 + uKick * 2.0);
+    glowAccum += exp(-abs(d) * 4.0) * 0.012 * (0.4 + uKick * 1.0);
 
     // Track proximity to black hole for special glow — scales with BH size
     float bhProx = length(p - bhPos);
@@ -493,6 +627,9 @@ void main() {
     }
     nearest = min(nearest, dSpawn);
 
+    float dCube = cubefieldSDF(p);
+    nearest = min(nearest, dCube);
+
     vec3 surfCol;
     if(abs(dBH - nearest) < 0.02) {
       vec3 bhRel = p - bhPos;
@@ -506,48 +643,57 @@ void main() {
         float heat = exp(-abs(diskR2d - uBHSize) * 2.0 / uBHSize);
         float innerHeat = exp(-abs(diskR2d - uBHSize * 0.55) * 4.0 / uBHSize);
         float spin = sin(atan(bhRel.z, bhRel.x) * 12.0 + uTime * 6.0);
-        vec3 innerCol = vec3(1.0, 0.95, 0.85) * (0.4 + uKick * 3.0);
+        vec3 innerCol = vec3(1.0, 0.95, 0.85) * (0.4 + uKick * 1.5);
         surfCol = mix(snareCol, bhCol, heat);
         surfCol = mix(surfCol, innerCol, innerHeat);
-        surfCol *= (0.3 + uKick * 2.0 + spin * 0.3 * uKick);
+        surfCol *= (0.3 + uKick * 1.0 + spin * 0.2 * uKick);
       }
     } else if(abs(dSpawn - nearest) < 0.02 && hitSpawn >= 0) {
       float spawnType = uSpawnA[hitSpawn].w;
       if (spawnType < 2.5) {
-        surfCol = kickCol * (0.5 + uKick * 2.0);
+        surfCol = kickCol * (0.4 + uKick * 1.0);
       } else if (spawnType < 5.5) {
         surfCol = hatCol * (0.2 + uEnergy * 0.2 + uKick * 0.3);
       } else if (spawnType < 6.5) {
-        surfCol = snareCol * (0.6 + uKick * 1.5 + uHat * 1.5);
+        surfCol = snareCol * (0.5 + uKick * 0.8 + uHat * 0.8);
       } else if (spawnType < 7.5) {
-        surfCol = vec3(0.8, 0.85, 0.9) * (0.5 + uKick * 2.5);
+        surfCol = vec3(0.8, 0.85, 0.9) * (0.4 + uKick * 1.0);
       } else if (spawnType < 8.5) {
-        // Gear — bright metallic, spins fast
-        surfCol = kickCol * (0.7 + uKick * 1.5 + uChaos * 0.5);
+        surfCol = kickCol * (0.5 + uKick * 0.8 + uChaos * 0.3);
+      } else if (spawnType < 15.5) {
+        // Type 15: Hero cube — Crimson Desert intense blue-white on kicks
+        surfCol = mix(vec3(0.2, 0.35, 0.7), kickCol, uKick * 0.6)
+                  * (0.5 + uEnergy * 0.9 + uKick * 1.6);
       } else {
-        // Antenna — cold technical gray
-        surfCol = hatCol * (0.4 + uEnergy * 0.3 + uKick * 0.5);
+        // Types 9+ — moderate metallic
+        surfCol = mix(snareCol, kickCol, uKick * 0.3) * (0.3 + uEnergy * 0.3 + uKick * 0.5);
       }
+    } else if (abs(dCube - nearest) < 0.02) {
+      // Crimson Desert cube field — blue-dark metallic, energy-lit edges
+      vec3 cubeBase = mix(vec3(0.08, 0.14, 0.32), vec3(0.3, 0.45, 0.75),
+                          uEnergy * 0.7 + uKick * 0.5);
+      surfCol = cubeBase * (0.35 + uEnergy * 0.9 + uKick * 1.4);
+      surfCol *= 0.85 + 0.15 * sin(p.z * 0.4 + uTime * 0.25);
     } else {
       surfCol = mix(snareCol, kickCol, uKick * 0.5);
       surfCol = mix(surfCol, hatCol, uHat * 0.3);
-      surfCol *= 0.5 + uKick * 2.0;
+      surfCol *= 0.4 + uKick * 1.0;
     }
 
-    float glow = (1.0 + uKick*2.0) / (1.0 + dist*0.08);
+    float glow = (1.0 + uKick*1.0) / (1.0 + dist*0.08);
     col = surfCol * glow;
 
     vec3 rimCol = mix(hatCol, kickCol, 0.5+0.5*sin(uTime));
     col += rimCol * smoothstep(0.01, 0.05, minDist) * (0.2 + uKick * 0.4);
   }
 
-  col += bhCol * min(bhGlow, 0.8) * (0.2 + uKick * 2.0);
+  col += bhCol * min(bhGlow, 0.8) * (0.2 + uKick * 1.0);
 
   vec3 glowCol = mix(snareCol, kickCol, 0.5+0.5*sin(uTime*0.5));
-  col += glowCol * glowAccum * (0.5 + uKick * 1.0);
+  col += glowCol * glowAccum * (0.4 + uKick * 0.6);
 
-  float nearGlow = min(0.05/(0.01+minDist*minDist), 0.8);
-  col += glowCol * nearGlow * (0.1 + uKick * 0.4);
+  float nearGlow = min(0.05/(0.01+minDist*minDist), 0.4);
+  col += glowCol * nearGlow * (0.08 + uKick * 0.2);
 
   float fogFactor = 1.0 - exp(-dist * uFogDensity);
   fogFactor = min(fogFactor, 0.4);
@@ -621,7 +767,7 @@ void main() {
     total += w * 2.0;
   }
   bloom = max(bloom/total - ${CFG.post.bloomThreshold.toFixed(1)}, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
-  col += bloom * (0.05 + uKick * 0.35);
+  col += bloom * (0.04 + uKick * 0.2);
 
   // Feedback trail — minimal, kicks only
   float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.004 - uImpact * 0.02;
@@ -633,19 +779,18 @@ void main() {
 
   // Kick flash — white, ULTRAKILL red on hardest
   vec3 flashCol = mix(vec3(1.0), vec3(1.0, 0.1, 0.05), smoothstep(0.15, 0.35, uKick));
-  col += flashCol * smoothstep(0.12, 0.35, uKick) * 0.3;
+  col += flashCol * smoothstep(0.12, 0.35, uKick) * 0.15;
 
-  // BH pass-through flash — red bleed at peak
+  // BH pass-through flash — red-tinted, softer, no white-out
   if (uFlash > 0.01) {
-    float flashStr = pow(uFlash, 0.5);
-    vec3 bhFlashCol = mix(vec3(1.0), vec3(1.0, 0.2, 0.1), smoothstep(0.6, 1.0, uFlash));
-    col = mix(col, bhFlashCol * 1.2, flashStr);
-    if (uFlash > 0.5) col = bhFlashCol * 1.2;
+    float flashStr = pow(uFlash, 0.7);
+    vec3 bhFlashCol = mix(vec3(0.8, 0.75, 0.7), vec3(1.0, 0.2, 0.1), smoothstep(0.3, 0.8, uFlash));
+    col = mix(col, bhFlashCol, flashStr * 0.6);
   }
 
-  // Flash-frame color inversion on hardest hits
-  if (uImpact > 0.7) {
-    float invStr = (uImpact - 0.7) / 0.3 * 0.6;
+  // Flash-frame color inversion on hardest hits — reduced
+  if (uImpact > 0.8) {
+    float invStr = (uImpact - 0.8) / 0.2 * 0.3;
     col = mix(col, vec3(1.0) - col, invStr);
   }
 
@@ -792,6 +937,7 @@ function initAudio() {
     analyser.connect(audioCtx.destination);
     freqData = new Uint8Array(analyser.frequencyBinCount);
     timeData = new Uint8Array(analyser.frequencyBinCount);
+    initVoice();
   } catch (e) {
     showError('Audio init failed: ' + e.message);
   }
@@ -1527,6 +1673,14 @@ function updateSpawns() {
     spawnTear();
     if (Math.random() < 0.5) spawnTear();
     if (Math.random() < 0.3) spawnTear(true); // center tear
+    // Ring burst — particles spawn ON the spectrum ring surface
+    const burstR = Math.min(W, H) * 0.32;
+    const burstN = 15 + Math.floor(kd * 60);
+    for (let rb = 0; rb < burstN; rb++) {
+      const ba = Math.random() * Math.PI * 2;
+      spawnOne(W/2 + Math.cos(ba)*burstR, H/2 + Math.sin(ba)*burstR,
+        Math.cos(ba)*200*kd, Math.sin(ba)*200*kd, -1, 3, 0.5, 0);
+    }
   }
   if (snareGated > th.snare) {
     spawnBurst('snare', 0);
@@ -1606,6 +1760,75 @@ function spawnTear(center) {
 let mandalaAlpha = 0;
 let mandalaHue = 0;
 
+// ─── SAM.js Voice Engine (ULTRAKILL V1 Robot Voice) ─────────────────
+const VOICE_LINES = {
+  idle: ['SYSTEM ONLINE','STANDBY MODE','AWAITING INPUT','SCANNING FREQUENCIES',
+    'SIGNAL DETECTED','MONITORING','ALL SYSTEMS NOMINAL','RECALIBRATING'],
+  rankUp: ['THREAT LEVEL INCREASING','STYLE RANK ACHIEVED','POWER SURGE DETECTED',
+    'ESCALATING','IMPRESSIVE','EXCEEDING PARAMETERS','LIMIT BREAK'],
+  ultrakill: ['MANKIND IS DEAD','BLOOD IS FUEL','HELL IS FULL','ULTRAKILL',
+    'MAXIMUM STYLE','UNSTOPPABLE','BEYOND HUMAN LIMITS','PERFECTION'],
+  bhPass: ['SINGULARITY BREACH','REALITY TORN','SECTOR OVERWRITTEN',
+    'DIMENSIONAL COLLAPSE','RECONSTRUCTING'],
+  breakdown: ['SIGNAL LOST','ENTERING VOID','SILENCE DETECTED',
+    'POWER DOWN SEQUENCE','STANDBY'],
+  styleBonus: ['HEADSHOT','DOUBLE KILL','TRIPLE KILL','OVERKILL',
+    'PARRY','DISRESPECT','RICOSHOT','ULTRARICOSHOT',
+    'CONDUCTOR','HOMERUN','TERMINAL VELOCITY','GROOVY'],
+  boot: ['BOOT UP SEQUENCE READY','ALL SYSTEMS OPERATIONAL',
+    'MACHINE ID V1','CALIBRATION COMPLETE',
+    'FIRMWARE LOADED','CURRENT OBJECTIVE FIND A WEAPON'],
+};
+let samVoice = null;
+let voiceGain = null;
+let voiceDistortion = null;
+let voiceCooldown = 0;
+function pickVoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function makeVoiceDistortionCurve(amount) {
+  const n = 44100, curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i * 2) / n - 1;
+    curve[i] = ((3 + amount) * x * 20 * (Math.PI / 180)) / (Math.PI + amount * Math.abs(x));
+  }
+  return curve;
+}
+
+function initVoice() {
+  if (typeof SamJs === 'undefined' || !audioCtx) return;
+  samVoice = new SamJs({ pitch: 60, speed: 92, mouth: 190, throat: 190 });
+  voiceDistortion = audioCtx.createWaveShaper();
+  voiceDistortion.curve = makeVoiceDistortionCurve(200);
+  voiceDistortion.oversample = '4x';
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 3000;
+  filter.Q.value = 1.0;
+  voiceGain = audioCtx.createGain();
+  voiceGain.gain.value = 0.35;
+  voiceDistortion.connect(filter);
+  filter.connect(voiceGain);
+  voiceGain.connect(audioCtx.destination);
+}
+
+function speakLine(text) {
+  if (!samVoice || !audioCtx || !voiceDistortion) return;
+  try {
+    const buf = samVoice.buf32(text);
+    if (!buf || buf.length === 0) return;
+    const ab = audioCtx.createBuffer(1, buf.length, 22050);
+    ab.getChannelData(0).set(buf);
+    const src = audioCtx.createBufferSource();
+    src.buffer = ab;
+    src.connect(voiceDistortion);
+    src.start();
+  } catch(e) { /* SAM can fail on some inputs */ }
+}
+
+// Style bonus text state
+let styleBonusText = '';
+let styleBonusAlpha = 0;
+
 // ─── Camera + Impact State ──────────────────────────────────────────
 let cameraZ = 0;
 let cameraSpeed = 0;
@@ -1656,12 +1879,15 @@ function spawnObject(type, zAhead, xyRadius, scale, maxLife) {
   const i = allocSpawnSlot();
   const s = spawnPool[i];
   const angle = Math.random() * Math.PI * 2;
+  // Enforce peripheral placement — never inside the corridor
+  const minR = evoSmooth.corridorR + 0.8;
+  const effectiveR = Math.max(xyRadius, minR);
   s.active = true;
   s.type = type;
-  s.x = shakeX + Math.cos(angle) * xyRadius;
-  s.y = shakeY + Math.sin(angle) * xyRadius;
+  s.x = shakeX + Math.cos(angle) * effectiveR;
+  s.y = shakeY + Math.sin(angle) * effectiveR;
   s.z = cameraZ + zAhead;
-  s.scale = scale * 0.7;
+  s.scale = scale * 0.85;
   s.maxLife = maxLife;
   s.age = 0;
   s.life = 0;
@@ -1698,9 +1924,15 @@ const TECH_TEXTS = [
   'VELOCITY: ${spd}', 'DEPTH: ${z}', 'CHAOS: ${chaos}',
   '#define BREAKCORE 1', 'pragma once', 'void main() {',
   'gl_FragColor = blood;', 'if(dead) respawn();',
+  'MANKIND IS DEAD', 'BLOOD IS FUEL', 'HELL IS FULL',
+  'MACHINE HAS SPOKEN', 'V1_ACTIVE', 'COIN_TOSS++',
+  'PARRY: SUCCESS', 'RICOSHOT CONFIRMED', 'DAMAGE: CRITICAL',
+  'STYLE_BONUS += ${dmg}', 'WEAPON_SWAP()', 'overheat = true;',
+  'FEED_THE_MACHINE', 'NO_MERCY_MODE', 'struct V1 { blood: f32 }',
+  'TERMINAL_VELOCITY', 'GREED_LAYER_ACTIVE', '// god is dead',
 ];
 const techTextPool = [];
-const MAX_TECH_TEXTS = 14;
+const MAX_TECH_TEXTS = 20;
 let techTextCooldown = 0;
 
 function spawnTechText(energy, kick, side) {
@@ -1709,9 +1941,14 @@ function spawnTechText(energy, kick, side) {
     techTextPool.shift();
   }
   const W = window.innerWidth, H = window.innerHeight;
-  side = side || ['left','right','top'][Math.floor(Math.random() * 3)];
+  if (!side && Math.random() < 0.1) side = 'center';
+  side = side || ['left','right','top','bottom'][Math.floor(Math.random() * 4)];
   let x, y, align;
-  if (side === 'left') {
+  if (side === 'center') {
+    x = W * 0.3 + Math.random() * W * 0.4;
+    y = H * 0.3 + Math.random() * H * 0.4;
+    align = 'center';
+  } else if (side === 'left') {
     x = 10 + Math.random() * W * 0.12;
     y = 30 + Math.random() * H * 0.85;
     align = 'left';
@@ -1719,9 +1956,13 @@ function spawnTechText(energy, kick, side) {
     x = W - 10 - Math.random() * W * 0.12;
     y = 30 + Math.random() * H * 0.85;
     align = 'right';
-  } else {
+  } else if (side === 'top') {
     x = W * 0.1 + Math.random() * W * 0.8;
     y = 10 + Math.random() * H * 0.12;
+    align = 'center';
+  } else {
+    x = W * 0.1 + Math.random() * W * 0.8;
+    y = H * 0.88 + Math.random() * H * 0.07;
     align = 'center';
   }
   const template = TECH_TEXTS[Math.floor(Math.random() * TECH_TEXTS.length)];
@@ -1743,6 +1984,23 @@ function resolveTechText(template, energy, kick, chaos, speed, z) {
     .replace('${hex}', Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0'))
     .replace('${bp}', (80 + energy * 120).toFixed(0))
     .replace('${dmg}', (kick * 999).toFixed(0));
+}
+
+// ── Side Data Lines ──
+const dataLines = [];
+const MAX_DATA_LINES = 16;
+let dataLineCooldown = 0;
+function spawnDataLine() {
+  const H = window.innerHeight;
+  const side = Math.random() < 0.5 ? 'left' : 'right';
+  dataLines.push({
+    y: 30 + Math.random() * (H - 60), side,
+    length: 20 + Math.random() * 60,
+    speed: 30 + Math.random() * 50,
+    life: 1.5 + Math.random() * 2, age: 0,
+    thickness: 1 + Math.random(),
+  });
+  if (dataLines.length > MAX_DATA_LINES) dataLines.shift();
 }
 
 // ── Telemetry recorder ──
@@ -1959,6 +2217,26 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       }
     }
 
+    // ── Side Data Lines — streaming from edges ──
+    dataLineCooldown -= dt;
+    if (dataLineCooldown <= 0) {
+      dataLineCooldown = 0.5 + Math.random() * 1.0 - energy * 1.5;
+      dataLineCooldown = Math.max(0.15, dataLineCooldown);
+      spawnDataLine();
+    }
+    for (let i = dataLines.length - 1; i >= 0; i--) {
+      const dl = dataLines[i];
+      dl.age += dt;
+      if (dl.age >= dl.life) { dataLines.splice(i, 1); continue; }
+      const alpha = Math.min(1, dl.age / 0.2) * Math.min(1, (dl.life - dl.age) / 0.3);
+      const inset = Math.min(1, dl.age * dl.speed / 100) * W * 0.08;
+      const dlX = dl.side === 'left' ? inset : W - inset - dl.length;
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.fillStyle = isUK ? 'rgba(255,60,40,1)' : isBK ? 'rgba(200,180,175,1)' : 'rgba(140,145,150,1)';
+      ctx.fillRect(dlX, dl.y, dl.length, dl.thickness);
+    }
+    ctx.globalAlpha = 1;
+
     // ── Outer Spectrum Ring — breathes with KICK, not general energy ──
     // Anticipation "inhale": ring contracts before drops, then explodes on drop
     const inhale = lookAhead.anticipation; // 0-1, peaks just before drop
@@ -1983,6 +2261,68 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       ctx.moveTo(ringCX + Math.cos(angle) * innerSpike, ringCY + Math.sin(angle) * innerSpike);
       ctx.lineTo(ringCX + Math.cos(angle) * outerSpike, ringCY + Math.sin(angle) * outerSpike);
       ctx.stroke();
+    }
+
+    // ── Circular Waveform Scope (inside spectrum ring) ──
+    if (timeData) {
+      const waveR = ringR * 0.6;
+      ctx.beginPath();
+      ctx.strokeStyle = isUK ? 'rgba(255,60,40,0.3)' : 'rgba(160,165,170,0.25)';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 256; i++) {
+        const wt = i / 256;
+        const wAngle = wt * Math.PI * 2 - Math.PI / 2;
+        const wv = (timeData[Math.floor(wt * timeData.length)] - 128) / 128;
+        const wr = waveR * (1.0 + wv * 0.3);
+        const wx = ringCX + Math.cos(wAngle) * wr;
+        const wy = ringCY + Math.sin(wAngle) * wr;
+        if (i === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // ── Frequency Fill Rings (center density) ──
+    const innerBands = [
+      { band: bands.sub, rMul: 0.45, color: isUK ? '255,60,40' : '180,185,190' },
+      { band: bands.low, rMul: 0.30, color: isUK ? '255,80,60' : '160,165,170' },
+      { band: bands.mid, rMul: 0.18, color: isUK ? '255,100,80' : '140,145,150' },
+    ];
+    for (const ib of innerBands) {
+      const ir = ringR * ib.rMul * (1.0 + ib.band * 0.3);
+      ctx.globalAlpha = 0.06 + ib.band * 0.12;
+      ctx.fillStyle = `rgba(${ib.color},1)`;
+      ctx.beginPath();
+      ctx.arc(ringCX, ringCY, ir, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── Center Targeting Reticle ──
+    const reticleSize = 15 + kick * 20;
+    const reticleAlpha = 0.15 + kick * 0.3;
+    ctx.strokeStyle = isUK ? `rgba(255,60,40,${reticleAlpha.toFixed(2)})` : `rgba(180,185,190,${reticleAlpha.toFixed(2)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - reticleSize, cy); ctx.lineTo(cx - 5, cy);
+    ctx.moveTo(cx + 5, cy); ctx.lineTo(cx + reticleSize, cy);
+    ctx.moveTo(cx, cy - reticleSize); ctx.lineTo(cx, cy - 5);
+    ctx.moveTo(cx, cy + 5); ctx.lineTo(cx, cy + reticleSize);
+    ctx.stroke();
+    ctx.globalAlpha = reticleAlpha * 0.5;
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    ctx.globalAlpha = 1;
+
+    // ── Style Bonus Text Flash ──
+    if (styleBonusAlpha > 0.05) {
+      ctx.font = `bold ${Math.floor(28 + styleBonusAlpha * 12)}px 'Courier New', monospace`;
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = styleBonusAlpha;
+      ctx.fillStyle = isUK ? `rgba(255,60,40,1)` : `rgba(255,255,255,1)`;
+      ctx.fillText(styleBonusText, cx + (Math.random()-0.5)*4, cy - ringR * 0.7);
+      ctx.textAlign = 'start';
+      ctx.globalAlpha = 1;
     }
 
     // Spinning Wireframe Shapes with parallax
@@ -2143,7 +2483,7 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
       const life = t.age / t.maxLife;
       const fadeIn = Math.min(1, t.age / 0.3);
       const fadeOut = Math.min(1, (t.maxLife - t.age) / 0.5);
-      const alpha = fadeIn * fadeOut * (0.4 + energy * 0.4);
+      const alpha = fadeIn * fadeOut * (0.4 + energy * 0.4) * (t.side === 'center' ? 0.4 : 1.0);
       const text = resolveTechText(t.template, energy, kick, chaosMetric, cameraSpeed, cameraZ);
       ctx.font = `${t.fontSize}px 'Courier New', monospace`;
       ctx.textAlign = t.align;
@@ -2158,8 +2498,10 @@ function drawOverlay(dt, W, H, energy, kick, hue, section) {
     // Spawn new texts
     techTextCooldown -= dt;
     if (techTextCooldown <= 0) {
-      techTextCooldown = 1.5 + Math.random() * 2.0 - energy * 3.0; // faster at high energy
-      techTextCooldown = Math.max(0.3, techTextCooldown);
+      techTextCooldown = 1.5 + Math.random() * 2.0 - energy * 3.0;
+      if (styleRank >= 5) techTextCooldown *= 0.4;
+      else if (styleRank >= 4) techTextCooldown *= 0.6;
+      techTextCooldown = Math.max(0.2, techTextCooldown);
       spawnTechText(energy, kick);
     }
   }
@@ -2266,6 +2608,7 @@ function startPlayback(file) {
   audioEl.play().then(() => {
     isPlaying = true; isPaused = false;
     dropZone.classList.add('hidden');
+    setTimeout(() => speakLine(pickVoice(VOICE_LINES.boot)), 500);
   }).catch(e => showError('Play failed: ' + e.message));
 }
 
@@ -2294,7 +2637,7 @@ let pendingFile = null;
 
 function showModeChoice(file) {
   pendingFile = file;
-  dropZone.querySelector('div').innerHTML =
+  document.getElementById('drop-inner').innerHTML =
     `<div style="margin-bottom:20px;font-size:20px;letter-spacing:2px">MODE SELECT</div>` +
     `<button id="btn-realtime" class="mode-btn"><span class="label">&#9654; Real-time</span><span class="desc">Instant playback, reactive only</span></button>` +
     `<button id="btn-analyzed" class="mode-btn recommended"><span class="label">&#9889; Analyzed</span><span class="desc">Pre-scans track &middot; anticipation &middot; look-ahead</span></button>` +
@@ -2312,7 +2655,7 @@ function showModeChoice(file) {
 }
 
 function restoreDropZone() {
-  dropZone.querySelector('div').innerHTML =
+  document.getElementById('drop-inner').innerHTML =
     `DROP AUDIO HERE<small>click for fullscreen &middot; space=pause &middot; F=fullscreen &middot; D=debug</small>`;
   // Re-attach click handler for file picker
   dropZone.onclick = dropZoneClick;
@@ -2501,8 +2844,21 @@ function frame(nowMs) {
     styleShake += (Math.random() - 0.5) * kick * 8;
     // Kick-triggered tech text
     if (kick > 0.15 && Math.random() < 0.3) spawnTechText(energy, kick);
+    // SAM voice on kick at ULTRAKILL rank
+    if (kick > 0.2 && styleRank >= 5 && voiceCooldown <= 0 && Math.random() < 0.05) {
+      speakLine(pickVoice(VOICE_LINES.styleBonus));
+      voiceCooldown = 4.0;
+    }
+    // Style bonus text flash at BREAKCORE+
+    if (kick > 0.2 && styleRank >= 4 && Math.random() < 0.15) {
+      const bonuses = ['HEADSHOT','OVERKILL','PARRY','DISRESPECT','RICOSHOT',
+        'GROOVY','DOUBLE KILL','HOMERUN','CONDUCTOR','INSTAKILL'];
+      styleBonusText = bonuses[Math.floor(Math.random() * bonuses.length)];
+      styleBonusAlpha = 1.0;
+    }
   }
   styleShake *= 0.85;
+  styleBonusAlpha *= 0.92;
 
   // ULTRAKILL red particles — rate scales with rank
   const redRate = styleRank >= 5 ? 0.3 : styleRank >= 4 ? 0.15 : 0.05;
@@ -2567,38 +2923,46 @@ function frame(nowMs) {
   if (kickDelta * percGate > 0.005 && kick > 0.12 && spawnCooldowns.kick <= 0) {
     spawnCooldowns.kick = 0.4;
     const r = Math.random();
-    if (r < 0.5) spawnObject(1, 8 + Math.random()*15, 1.5, 0.8 + Math.random()*0.5, 4 + Math.random()*4);
-    else if (r < 0.8) spawnObject(2, 5 + Math.random()*8, 1.0, 0.5 + Math.random()*0.3, 2 + Math.random()*2);
-    else spawnObject(6, 3 + Math.random()*5, 0.8, 0.2, 1 + Math.random()*2);
+    if (r < 0.25) spawnObject(15, 10 + Math.random()*12, 3.0, 1.2 + Math.random()*0.6, 3 + Math.random()*3); // hero cube
+    else if (r < 0.40) spawnObject(1, 8 + Math.random()*15, 3.0, 0.8 + Math.random()*0.5, 4 + Math.random()*4);
+    else if (r < 0.60) spawnObject(10, 5 + Math.random()*8, 2.5, 0.6, 2 + Math.random()*2); // sawblade
+    else if (r < 0.80) spawnObject(2, 5 + Math.random()*8, 2.5, 0.5 + Math.random()*0.3, 2 + Math.random()*2);
+    else spawnObject(6, 3 + Math.random()*5, 2.0, 0.2, 1 + Math.random()*2);
   }
   if (bands.low - prevSnare > 0.008 && spawnCooldowns.snare <= 0) {
     spawnCooldowns.snare = 0.25;
-    for (let i = 0; i < 2; i++) spawnObject(6, 3 + Math.random()*6, 1.0, 0.15 + Math.random()*0.1, 1 + Math.random()*2);
-    if (Math.random() < 0.3) spawnObject(7, 6 + Math.random()*10, 2.0, 1.2, 3 + Math.random()*3);
+    if (Math.random() < 0.3) spawnObject(15, 8 + Math.random()*10, 3.0, 1.0 + Math.random()*0.4, 2 + Math.random()*2); // hero cube
+    for (let i = 0; i < 2; i++) spawnObject(6, 3 + Math.random()*6, 2.5, 0.15 + Math.random()*0.1, 1 + Math.random()*2);
+    if (Math.random() < 0.3) spawnObject(12, 4 + Math.random()*6, 2.0, 0.4, 1.5 + Math.random()*1.5); // coin
+    else if (Math.random() < 0.3) spawnObject(7, 6 + Math.random()*10, 3.0, 1.2, 3 + Math.random()*3);
   }
   if (chaos > 0.3 && spawnCooldowns.hat <= 0) {
     spawnCooldowns.hat = 0.8;
     const r = Math.random();
-    if (r < 0.35) spawnObject(7, 8 + Math.random()*12, 2.5, 1.0, 3 + Math.random()*3);
-    else if (r < 0.65) spawnObject(8, 6 + Math.random()*10, 1.5, 0.8, 3 + Math.random()*3); // gear
-    else spawnObject(1, 10 + Math.random()*15, 2.0, 0.6, 4 + Math.random()*4);
+    if (r < 0.2) spawnObject(15, 9 + Math.random()*12, 3.2, 0.8 + Math.random()*0.4, 2 + Math.random()*2); // hero cube
+    else if (r < 0.35) spawnObject(7, 8 + Math.random()*12, 3.5, 1.0, 3 + Math.random()*3);
+    else if (r < 0.55) spawnObject(8, 6 + Math.random()*10, 3.0, 0.8, 3 + Math.random()*3); // gear
+    else if (r < 0.75) spawnObject(10, 5 + Math.random()*8, 2.5, 0.7, 2 + Math.random()*2); // sawblade
+    else spawnObject(1, 10 + Math.random()*15, 3.5, 0.6, 4 + Math.random()*4);
   }
   if (section === 'drop' && energyHistory.prevSection !== 'drop' && spawnCooldowns.drop <= 0) {
     spawnCooldowns.drop = 6.0;
-    spawnObject(3, 20 + Math.random()*20, 3.0, 2.5, 8 + Math.random()*7);
-    spawnObject(5, 30 + Math.random()*20, 4.0, 2.0, 10 + Math.random()*10);
+    spawnObject(3, 20 + Math.random()*20, 4.0, 2.5, 8 + Math.random()*7);
+    spawnObject(13, 25 + Math.random()*15, 4.5, 1.5, 6 + Math.random()*4); // railgun
+    spawnObject(5, 30 + Math.random()*20, 5.0, 2.0, 10 + Math.random()*10);
   }
   if (section === 'breakdown' && energyHistory.prevSection !== 'breakdown' && spawnCooldowns.breakdown <= 0) {
     spawnCooldowns.breakdown = 8.0;
     if (Math.random() < 0.7) spawnObject(5, 35 + Math.random()*15, 5.0, 2.5, 12 + Math.random()*8);
-    else spawnObject(4, 10 + Math.random()*10, 2.0, 1.5, 3 + Math.random()*2);
+    else spawnObject(4, 10 + Math.random()*10, 3.5, 1.5, 3 + Math.random()*2);
   }
   if (energy > 0.2 && spawnCooldowns.sustained <= 0) {
     spawnCooldowns.sustained = 1.5;
     const r = Math.random();
-    if (r < 0.4) { spawnObject(2, 5 + Math.random()*8, 1.2, 0.5, 2 + Math.random()*2); spawnObject(2, 5 + Math.random()*8, 1.2, 0.5, 2 + Math.random()*2); }
-    else if (r < 0.7) spawnObject(1, 10 + Math.random()*15, 2.0, 0.7, 4 + Math.random()*4);
-    else spawnObject(3, 15 + Math.random()*20, 3.0, 2.0, 8 + Math.random()*7);
+    if (r < 0.25) { spawnObject(2, 5 + Math.random()*8, 3.0, 0.5, 2 + Math.random()*2); spawnObject(2, 5 + Math.random()*8, 3.0, 0.5, 2 + Math.random()*2); }
+    else if (r < 0.45) spawnObject(11, 8 + Math.random()*10, 3.0, 0.8, 4 + Math.random()*3); // piston
+    else if (r < 0.65) spawnObject(1, 10 + Math.random()*15, 3.5, 0.7, 4 + Math.random()*4);
+    else spawnObject(3, 15 + Math.random()*20, 4.0, 2.0, 8 + Math.random()*7);
   }
   // Ambient spawning — scene is never empty
   if (spawnCooldowns.ambient <= 0) {
@@ -2606,12 +2970,17 @@ function frame(nowMs) {
     if (activeCount < 5) {
       spawnCooldowns.ambient = 1.2 + Math.random() * 0.8;
       const r = Math.random();
-      if (r < 0.2) spawnObject(5, 25 + Math.random()*25, 4.0, 1.5 + Math.random(), 10 + Math.random()*10); // monolith
-      else if (r < 0.35) spawnObject(7, 10 + Math.random()*15, 2.5, 1.0, 4 + Math.random()*4); // energy ring
-      else if (r < 0.5) spawnObject(2, 8 + Math.random()*12, 1.5, 0.6, 3 + Math.random()*3); // cross blade
-      else if (r < 0.65) spawnObject(4, 15 + Math.random()*15, 3.0, 1.5, 5 + Math.random()*5); // void frame
-      else if (r < 0.8) spawnObject(8, 8 + Math.random()*12, 2.0, 0.8, 4 + Math.random()*3); // gear
-      else spawnObject(9, 20 + Math.random()*20, 3.0, 1.2, 8 + Math.random()*6); // antenna
+      if (r < 0.15) spawnObject(15, 12 + Math.random()*15, 3.5, 0.9 + Math.random()*0.5, 3 + Math.random()*3); // hero cube (frequent)
+      else if (r < 0.22) spawnObject(5, 25 + Math.random()*25, 5.0, 1.5 + Math.random(), 10 + Math.random()*10); // monolith
+      else if (r < 0.32) spawnObject(7, 10 + Math.random()*15, 3.5, 1.0, 4 + Math.random()*4); // energy ring
+      else if (r < 0.42) spawnObject(2, 8 + Math.random()*12, 3.0, 0.6, 3 + Math.random()*3); // cross blade
+      else if (r < 0.52) spawnObject(4, 15 + Math.random()*15, 4.0, 1.5, 5 + Math.random()*5); // void frame
+      else if (r < 0.62) spawnObject(8, 8 + Math.random()*12, 3.0, 0.8, 4 + Math.random()*3); // gear
+      else if (r < 0.72) spawnObject(9, 20 + Math.random()*20, 4.0, 1.2, 8 + Math.random()*6); // antenna
+      else if (r < 0.80) spawnObject(11, 10 + Math.random()*12, 3.0, 0.8, 5 + Math.random()*4); // piston
+      else if (r < 0.88) spawnObject(10, 6 + Math.random()*10, 3.0, 0.6, 3 + Math.random()*3); // sawblade
+      else if (r < 0.95) spawnObject(13, 15 + Math.random()*15, 4.0, 1.0, 6 + Math.random()*4); // railgun
+      else spawnObject(14, 20 + Math.random()*20, 4.5, 1.0, 8 + Math.random()*6); // skull (rare)
     }
   }
 
@@ -2675,21 +3044,23 @@ function frame(nowMs) {
     hitlagFrames = 6; // BH pass hitlag
     bhPassFlash = 1.0;
     bhWorldZ = cameraZ + 50.0 + Math.random() * 40.0;
-    // BH pass tech text burst
+    // BH pass tech text burst + voice
     for (let i = 0; i < 4; i++) spawnTechText(1, 1);
+    if (voiceCooldown <= 0) { speakLine(pickVoice(VOICE_LINES.bhPass)); voiceCooldown = 4.0; }
     // Post-pass rebuild sequence
     rebuildQueue.length = 0;
-    rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 5, xyR: 1.5, scale: 1.5, maxLife: 3 });
-    rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 8, xyR: 2.0, scale: 1.5, maxLife: 3 });
-    rebuildQueue.push({ delay: 0.3, type: 6, zAhead: 4, xyR: 1.0, scale: 0.15, maxLife: 2 });
-    rebuildQueue.push({ delay: 0.3, type: 6, zAhead: 6, xyR: 1.0, scale: 0.15, maxLife: 2 });
-    rebuildQueue.push({ delay: 0.6, type: 7, zAhead: 10, xyR: 2.5, scale: 1.2, maxLife: 4 });
-    rebuildQueue.push({ delay: 1.0, type: 1, zAhead: 15, xyR: 2.0, scale: 0.8, maxLife: 5 });
-    rebuildQueue.push({ delay: 1.5, type: 5, zAhead: 30, xyR: 4.0, scale: 2.0, maxLife: 12 });
-    rebuildQueue.push({ delay: 2.0, type: 3, zAhead: 25, xyR: 3.0, scale: 2.5, maxLife: 10 });
-    rebuildQueue.push({ delay: 2.5, type: 1, zAhead: 18, xyR: 2.5, scale: 0.7, maxLife: 5 });
+    rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 5, xyR: 3.0, scale: 1.5, maxLife: 3 });
+    rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 8, xyR: 3.5, scale: 1.5, maxLife: 3 });
+    rebuildQueue.push({ delay: 0.3, type: 6, zAhead: 4, xyR: 2.5, scale: 0.15, maxLife: 2 });
+    rebuildQueue.push({ delay: 0.3, type: 6, zAhead: 6, xyR: 2.5, scale: 0.15, maxLife: 2 });
+    rebuildQueue.push({ delay: 0.6, type: 7, zAhead: 10, xyR: 3.5, scale: 1.2, maxLife: 4 });
+    rebuildQueue.push({ delay: 1.0, type: 14, zAhead: 12, xyR: 4.0, scale: 1.0, maxLife: 6 }); // skull on BH pass
+    rebuildQueue.push({ delay: 1.0, type: 1, zAhead: 15, xyR: 3.5, scale: 0.8, maxLife: 5 });
+    rebuildQueue.push({ delay: 1.5, type: 5, zAhead: 30, xyR: 5.0, scale: 2.0, maxLife: 12 });
+    rebuildQueue.push({ delay: 2.0, type: 3, zAhead: 25, xyR: 4.5, scale: 2.5, maxLife: 10 });
+    rebuildQueue.push({ delay: 2.5, type: 1, zAhead: 18, xyR: 4.0, scale: 0.7, maxLife: 5 });
   }
-  bhPassFlash *= (bhPassFlash > 0.5) ? 0.96 : 0.92;
+  bhPassFlash *= (bhPassFlash > 0.5) ? 0.92 : 0.88;
 
   const bhApproachFactor = Math.max(0.15, 15.0 / Math.max(bhDist, 0.5));
   const bhZ = bhWorldZ;
@@ -2704,10 +3075,17 @@ function frame(nowMs) {
   if (newRank > styleRank) {
     styleFlash = 1.0;
     prevStyleRank = styleRank;
+    // Voice on rank-up
+    if (voiceCooldown <= 0) {
+      const pool = newRank >= 5 ? VOICE_LINES.ultrakill : VOICE_LINES.rankUp;
+      speakLine(pickVoice(pool));
+      voiceCooldown = 4.0;
+    }
     styleRank = newRank;
     styleSustainTime = 0;
-    // Rank-up tech text burst
+    // Rank-up tech text burst + shock ring
     for (let i = 0; i < 3; i++) spawnTechText(energy, kick);
+    spawnRing(0);
   } else if (newRank < styleRank) {
     styleSustainTime += dt;
     if (styleSustainTime > 2.5) { styleRank = Math.max(newRank, styleRank - 1); styleSustainTime = 0; }
@@ -2715,6 +3093,18 @@ function frame(nowMs) {
     styleSustainTime = 0;
   }
   styleFlash *= 0.9;
+
+  // ── Voiceover triggers ──
+  voiceCooldown = Math.max(0, voiceCooldown - dt);
+  if (voiceCooldown <= 0 && isPlaying && voiceSynth) {
+    if (section === 'breakdown' && energy < 0.05 && Math.random() < 0.008) {
+      speakLine(pickVoice(VOICE_LINES.breakdown));
+      voiceCooldown = 6 + Math.random() * 4;
+    } else if (energy < 0.04 && Math.random() < 0.005) {
+      speakLine(pickVoice(VOICE_LINES.idle));
+      voiceCooldown = 8 + Math.random() * 5;
+    }
+  }
 
   // ── Telemetry sampling ──
   telemetryTime += dt;
