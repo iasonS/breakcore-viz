@@ -42,7 +42,6 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 #analyze-overlay .bar-fill{height:100%;background:#0f0;width:0%;transition:width .15s}
 #analyze-overlay .status{margin-top:10px;font-size:12px;color:rgba(0,255,0,.6)}
 </style>
-<script src="https://unpkg.com/sam-js@0.3.1"></script>
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -937,7 +936,6 @@ function initAudio() {
     analyser.connect(audioCtx.destination);
     freqData = new Uint8Array(analyser.frequencyBinCount);
     timeData = new Uint8Array(analyser.frequencyBinCount);
-    initVoice();
   } catch (e) {
     showError('Audio init failed: ' + e.message);
   }
@@ -1760,71 +1758,6 @@ function spawnTear(center) {
 let mandalaAlpha = 0;
 let mandalaHue = 0;
 
-// ─── SAM.js Voice Engine (ULTRAKILL V1 Robot Voice) ─────────────────
-const VOICE_LINES = {
-  idle: ['SYSTEM ONLINE','STANDBY MODE','AWAITING INPUT','SCANNING FREQUENCIES',
-    'SIGNAL DETECTED','MONITORING','ALL SYSTEMS NOMINAL','RECALIBRATING'],
-  rankUp: ['THREAT LEVEL INCREASING','STYLE RANK ACHIEVED','POWER SURGE DETECTED',
-    'ESCALATING','IMPRESSIVE','EXCEEDING PARAMETERS','LIMIT BREAK'],
-  ultrakill: ['MANKIND IS DEAD','BLOOD IS FUEL','HELL IS FULL','ULTRAKILL',
-    'MAXIMUM STYLE','UNSTOPPABLE','BEYOND HUMAN LIMITS','PERFECTION'],
-  bhPass: ['SINGULARITY BREACH','REALITY TORN','SECTOR OVERWRITTEN',
-    'DIMENSIONAL COLLAPSE','RECONSTRUCTING'],
-  breakdown: ['SIGNAL LOST','ENTERING VOID','SILENCE DETECTED',
-    'POWER DOWN SEQUENCE','STANDBY'],
-  styleBonus: ['HEADSHOT','DOUBLE KILL','TRIPLE KILL','OVERKILL',
-    'PARRY','DISRESPECT','RICOSHOT','ULTRARICOSHOT',
-    'CONDUCTOR','HOMERUN','TERMINAL VELOCITY','GROOVY'],
-  boot: ['BOOT UP SEQUENCE READY','ALL SYSTEMS OPERATIONAL',
-    'MACHINE ID V1','CALIBRATION COMPLETE',
-    'FIRMWARE LOADED','CURRENT OBJECTIVE FIND A WEAPON'],
-};
-let samVoice = null;
-let voiceGain = null;
-let voiceDistortion = null;
-let voiceCooldown = 0;
-function pickVoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-function makeVoiceDistortionCurve(amount) {
-  const n = 44100, curve = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / n - 1;
-    curve[i] = ((3 + amount) * x * 20 * (Math.PI / 180)) / (Math.PI + amount * Math.abs(x));
-  }
-  return curve;
-}
-
-function initVoice() {
-  if (typeof SamJs === 'undefined' || !audioCtx) return;
-  samVoice = new SamJs({ pitch: 60, speed: 92, mouth: 190, throat: 190 });
-  voiceDistortion = audioCtx.createWaveShaper();
-  voiceDistortion.curve = makeVoiceDistortionCurve(200);
-  voiceDistortion.oversample = '4x';
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.value = 3000;
-  filter.Q.value = 1.0;
-  voiceGain = audioCtx.createGain();
-  voiceGain.gain.value = 0.35;
-  voiceDistortion.connect(filter);
-  filter.connect(voiceGain);
-  voiceGain.connect(audioCtx.destination);
-}
-
-function speakLine(text) {
-  if (!samVoice || !audioCtx || !voiceDistortion) return;
-  try {
-    const buf = samVoice.buf32(text);
-    if (!buf || buf.length === 0) return;
-    const ab = audioCtx.createBuffer(1, buf.length, 22050);
-    ab.getChannelData(0).set(buf);
-    const src = audioCtx.createBufferSource();
-    src.buffer = ab;
-    src.connect(voiceDistortion);
-    src.start();
-  } catch(e) { /* SAM can fail on some inputs */ }
-}
-
 // Style bonus text state
 let styleBonusText = '';
 let styleBonusAlpha = 0;
@@ -2608,7 +2541,6 @@ function startPlayback(file) {
   audioEl.play().then(() => {
     isPlaying = true; isPaused = false;
     dropZone.classList.add('hidden');
-    setTimeout(() => speakLine(pickVoice(VOICE_LINES.boot)), 500);
   }).catch(e => showError('Play failed: ' + e.message));
 }
 
@@ -2844,11 +2776,6 @@ function frame(nowMs) {
     styleShake += (Math.random() - 0.5) * kick * 8;
     // Kick-triggered tech text
     if (kick > 0.15 && Math.random() < 0.3) spawnTechText(energy, kick);
-    // SAM voice on kick at ULTRAKILL rank
-    if (kick > 0.2 && styleRank >= 5 && voiceCooldown <= 0 && Math.random() < 0.05) {
-      speakLine(pickVoice(VOICE_LINES.styleBonus));
-      voiceCooldown = 4.0;
-    }
     // Style bonus text flash at BREAKCORE+
     if (kick > 0.2 && styleRank >= 4 && Math.random() < 0.15) {
       const bonuses = ['HEADSHOT','OVERKILL','PARRY','DISRESPECT','RICOSHOT',
@@ -3044,9 +2971,8 @@ function frame(nowMs) {
     hitlagFrames = 6; // BH pass hitlag
     bhPassFlash = 1.0;
     bhWorldZ = cameraZ + 50.0 + Math.random() * 40.0;
-    // BH pass tech text burst + voice
+    // BH pass tech text burst
     for (let i = 0; i < 4; i++) spawnTechText(1, 1);
-    if (voiceCooldown <= 0) { speakLine(pickVoice(VOICE_LINES.bhPass)); voiceCooldown = 4.0; }
     // Post-pass rebuild sequence
     rebuildQueue.length = 0;
     rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 5, xyR: 3.0, scale: 1.5, maxLife: 3 });
@@ -3075,12 +3001,6 @@ function frame(nowMs) {
   if (newRank > styleRank) {
     styleFlash = 1.0;
     prevStyleRank = styleRank;
-    // Voice on rank-up
-    if (voiceCooldown <= 0) {
-      const pool = newRank >= 5 ? VOICE_LINES.ultrakill : VOICE_LINES.rankUp;
-      speakLine(pickVoice(pool));
-      voiceCooldown = 4.0;
-    }
     styleRank = newRank;
     styleSustainTime = 0;
     // Rank-up tech text burst + shock ring
@@ -3093,18 +3013,6 @@ function frame(nowMs) {
     styleSustainTime = 0;
   }
   styleFlash *= 0.9;
-
-  // ── Voiceover triggers ──
-  voiceCooldown = Math.max(0, voiceCooldown - dt);
-  if (voiceCooldown <= 0 && isPlaying && voiceSynth) {
-    if (section === 'breakdown' && energy < 0.05 && Math.random() < 0.008) {
-      speakLine(pickVoice(VOICE_LINES.breakdown));
-      voiceCooldown = 6 + Math.random() * 4;
-    } else if (energy < 0.04 && Math.random() < 0.005) {
-      speakLine(pickVoice(VOICE_LINES.idle));
-      voiceCooldown = 8 + Math.random() * 5;
-    }
-  }
 
   // ── Telemetry sampling ──
   telemetryTime += dt;
