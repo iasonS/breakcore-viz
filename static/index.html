@@ -1653,6 +1653,7 @@ let prevKick = 0, prevSnare = 0, prevHat = 0;
 
 function updateSpawns() {
   if (!isPlaying) return;
+  const W = window.innerWidth, H = window.innerHeight;
   const kd = bands.sub - prevKick;
   const sd = bands.low - prevSnare;
   const hd = bands.high - prevHat;
