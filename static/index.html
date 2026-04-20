@@ -42,7 +42,6 @@ canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 #analyze-overlay .bar-fill{height:100%;background:#0f0;width:0%;transition:width .15s}
 #analyze-overlay .status{margin-top:10px;font-size:12px;color:rgba(0,255,0,.6)}
 </style>
-<script src="https://unpkg.com/sam-js@0.3.1"></script>
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -137,7 +136,7 @@ const CFG = {
 
   // Shader tuning
   scene: {
-    steps: 44, maxDist: 30.0, surfThreshold: 0.022,
+    steps: 56, maxDist: 30.0, surfThreshold: 0.022,
   },
   post: {
     bloomThreshold: 0.5, bloomIntensity: 1.2, bloomKickBoost: 0.25,
@@ -475,7 +474,7 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
     d = min(d, coil);
     float muzzle = length(localP - vec3(0, 3.0, 0)) - 0.25;
     d = min(d, muzzle);
-  } else {
+  } else if (stype < 14.5) {
     // Type 14: Skull fragment — V1 mechanical skull
     localP.xz *= rot2(spinSlow * 0.3);
     vec3 sp = localP; sp.y *= 0.7;
@@ -487,6 +486,13 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
     float jaw = max(abs(jp.x) - 0.5, max(abs(jp.y) - 0.25, abs(jp.z) - 0.4));
     d = min(skull, jaw);
     d = max(d, -(length(sp) - 0.85));
+  } else {
+    // Type 15: Hero cube — large Crimson Desert cube, energy-reactive spin
+    float rotSpeed = 0.3 + uEnergy * 5.0 + uKick * 10.0;
+    localP.xy *= rot2(uTime * rotSpeed       + tw * 0.8);
+    localP.xz *= rot2(uTime * rotSpeed * 0.6 + tw * 1.3);
+    vec3 q = abs(localP) - vec3(1.0);
+    d = length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
   }
 
   d += 0.01 * sin(localP.x*12.0+tw) * sin(localP.y*12.0) * sin(localP.z*12.0) * uEnergy;
@@ -494,9 +500,48 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
   return d * sc * envelope;
 }
 
+// ── Crimson Desert Cube Field ──
+float cubefieldSDF(vec3 p) {
+  float minD = 999.0;
+  float period = 3.0;
+  float cellZ = floor((p.z + period * 0.5) / period);
+
+  for (int iz = -1; iz <= 1; iz++) {
+    float cz = cellZ + float(iz);
+    float pz = p.z - cz * period;
+
+    for (int ic = 0; ic < 8; ic++) {
+      float fi = float(ic);
+      float h1 = fract(sin(dot(vec2(cz, fi),           vec2(127.1, 311.7))) * 43758.5);
+      float h2 = fract(sin(dot(vec2(cz + 10.0, fi),    vec2(269.5, 183.3))) * 43758.5);
+      float h3 = fract(sin(dot(vec2(cz + 20.0, fi),    vec2(113.5, 271.9))) * 43758.5);
+
+      float angle  = (fi / 8.0) * 6.283 + h1 * 0.9;
+      float radius = 3.2 + h2 * 4.8;
+      float cubeX  = cos(angle) * radius;
+      float cubeY  = sin(angle) * radius;
+      float yOff   = (h3 - 0.5) * 1.8;
+      float zOff   = (h1 - 0.5) * 2.0;
+
+      vec3 localP = p - vec3(cubeX, cubeY + yOff, cz * period + zOff);
+
+      float rotSpeed = (0.4 + uEnergy * 3.5 + uKick * 6.0) * (0.5 + h3 * 0.8);
+      localP.xy *= rot2(uTime * rotSpeed          + h1 * 6.283);
+      localP.xz *= rot2(uTime * rotSpeed * 0.65   + h2 * 6.283);
+
+      float sc  = 0.10 + h1 * 0.24;
+      vec3 q    = abs(localP) - vec3(sc);
+      float d   = length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+      minD = min(minD, d);
+    }
+  }
+  return minD;
+}
+
 // ── Combined Scene ──
 float sceneSDF(vec3 p) {
   float d = min(tunnelWallSDF(p), attractorSDF(p));
+  d = min(d, cubefieldSDF(p));
   for (int i = 0; i < 14; i++) {
     d = min(d, spawnSDF(p, uSpawnA[i], uSpawnB[i]));
   }
@@ -581,6 +626,9 @@ void main() {
     }
     nearest = min(nearest, dSpawn);
 
+    float dCube = cubefieldSDF(p);
+    nearest = min(nearest, dCube);
+
     vec3 surfCol;
     if(abs(dBH - nearest) < 0.02) {
       vec3 bhRel = p - bhPos;
@@ -611,10 +659,20 @@ void main() {
         surfCol = vec3(0.8, 0.85, 0.9) * (0.4 + uKick * 1.0);
       } else if (spawnType < 8.5) {
         surfCol = kickCol * (0.5 + uKick * 0.8 + uChaos * 0.3);
+      } else if (spawnType < 15.5) {
+        // Type 15: Hero cube — Crimson Desert intense blue-white on kicks
+        surfCol = mix(vec3(0.2, 0.35, 0.7), kickCol, uKick * 0.6)
+                  * (0.5 + uEnergy * 0.9 + uKick * 1.6);
       } else {
         // Types 9+ — moderate metallic
         surfCol = mix(snareCol, kickCol, uKick * 0.3) * (0.3 + uEnergy * 0.3 + uKick * 0.5);
       }
+    } else if (abs(dCube - nearest) < 0.02) {
+      // Crimson Desert cube field — blue-dark metallic, energy-lit edges
+      vec3 cubeBase = mix(vec3(0.08, 0.14, 0.32), vec3(0.3, 0.45, 0.75),
+                          uEnergy * 0.7 + uKick * 0.5);
+      surfCol = cubeBase * (0.35 + uEnergy * 0.9 + uKick * 1.4);
+      surfCol *= 0.85 + 0.15 * sin(p.z * 0.4 + uTime * 0.25);
     } else {
       surfCol = mix(snareCol, kickCol, uKick * 0.5);
       surfCol = mix(surfCol, hatCol, uHat * 0.3);
@@ -878,7 +936,6 @@ function initAudio() {
     analyser.connect(audioCtx.destination);
     freqData = new Uint8Array(analyser.frequencyBinCount);
     timeData = new Uint8Array(analyser.frequencyBinCount);
-    initVoice();
   } catch (e) {
     showError('Audio init failed: ' + e.message);
   }
@@ -1596,6 +1653,7 @@ let prevKick = 0, prevSnare = 0, prevHat = 0;
 
 function updateSpawns() {
   if (!isPlaying) return;
+  const W = window.innerWidth, H = window.innerHeight;
   const kd = bands.sub - prevKick;
   const sd = bands.low - prevSnare;
   const hd = bands.high - prevHat;
@@ -1700,71 +1758,6 @@ function spawnTear(center) {
 // Mandala state
 let mandalaAlpha = 0;
 let mandalaHue = 0;
-
-// ─── SAM.js Voice Engine (ULTRAKILL V1 Robot Voice) ─────────────────
-const VOICE_LINES = {
-  idle: ['SYSTEM ONLINE','STANDBY MODE','AWAITING INPUT','SCANNING FREQUENCIES',
-    'SIGNAL DETECTED','MONITORING','ALL SYSTEMS NOMINAL','RECALIBRATING'],
-  rankUp: ['THREAT LEVEL INCREASING','STYLE RANK ACHIEVED','POWER SURGE DETECTED',
-    'ESCALATING','IMPRESSIVE','EXCEEDING PARAMETERS','LIMIT BREAK'],
-  ultrakill: ['MANKIND IS DEAD','BLOOD IS FUEL','HELL IS FULL','ULTRAKILL',
-    'MAXIMUM STYLE','UNSTOPPABLE','BEYOND HUMAN LIMITS','PERFECTION'],
-  bhPass: ['SINGULARITY BREACH','REALITY TORN','SECTOR OVERWRITTEN',
-    'DIMENSIONAL COLLAPSE','RECONSTRUCTING'],
-  breakdown: ['SIGNAL LOST','ENTERING VOID','SILENCE DETECTED',
-    'POWER DOWN SEQUENCE','STANDBY'],
-  styleBonus: ['HEADSHOT','DOUBLE KILL','TRIPLE KILL','OVERKILL',
-    'PARRY','DISRESPECT','RICOSHOT','ULTRARICOSHOT',
-    'CONDUCTOR','HOMERUN','TERMINAL VELOCITY','GROOVY'],
-  boot: ['BOOT UP SEQUENCE READY','ALL SYSTEMS OPERATIONAL',
-    'MACHINE ID V1','CALIBRATION COMPLETE',
-    'FIRMWARE LOADED','CURRENT OBJECTIVE FIND A WEAPON'],
-};
-let samVoice = null;
-let voiceGain = null;
-let voiceDistortion = null;
-let voiceCooldown = 0;
-function pickVoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-function makeVoiceDistortionCurve(amount) {
-  const n = 44100, curve = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / n - 1;
-    curve[i] = ((3 + amount) * x * 20 * (Math.PI / 180)) / (Math.PI + amount * Math.abs(x));
-  }
-  return curve;
-}
-
-function initVoice() {
-  if (typeof SamJs === 'undefined' || !audioCtx) return;
-  samVoice = new SamJs({ pitch: 60, speed: 92, mouth: 190, throat: 190 });
-  voiceDistortion = audioCtx.createWaveShaper();
-  voiceDistortion.curve = makeVoiceDistortionCurve(200);
-  voiceDistortion.oversample = '4x';
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.value = 3000;
-  filter.Q.value = 1.0;
-  voiceGain = audioCtx.createGain();
-  voiceGain.gain.value = 0.35;
-  voiceDistortion.connect(filter);
-  filter.connect(voiceGain);
-  voiceGain.connect(audioCtx.destination);
-}
-
-function speakLine(text) {
-  if (!samVoice || !audioCtx || !voiceDistortion) return;
-  try {
-    const buf = samVoice.buf32(text);
-    if (!buf || buf.length === 0) return;
-    const ab = audioCtx.createBuffer(1, buf.length, 22050);
-    ab.getChannelData(0).set(buf);
-    const src = audioCtx.createBufferSource();
-    src.buffer = ab;
-    src.connect(voiceDistortion);
-    src.start();
-  } catch(e) { /* SAM can fail on some inputs */ }
-}
 
 // Style bonus text state
 let styleBonusText = '';
@@ -2549,7 +2542,6 @@ function startPlayback(file) {
   audioEl.play().then(() => {
     isPlaying = true; isPaused = false;
     dropZone.classList.add('hidden');
-    setTimeout(() => speakLine(pickVoice(VOICE_LINES.boot)), 500);
   }).catch(e => showError('Play failed: ' + e.message));
 }
 
@@ -2785,11 +2777,6 @@ function frame(nowMs) {
     styleShake += (Math.random() - 0.5) * kick * 8;
     // Kick-triggered tech text
     if (kick > 0.15 && Math.random() < 0.3) spawnTechText(energy, kick);
-    // SAM voice on kick at ULTRAKILL rank
-    if (kick > 0.2 && styleRank >= 5 && voiceCooldown <= 0 && Math.random() < 0.05) {
-      speakLine(pickVoice(VOICE_LINES.styleBonus));
-      voiceCooldown = 4.0;
-    }
     // Style bonus text flash at BREAKCORE+
     if (kick > 0.2 && styleRank >= 4 && Math.random() < 0.15) {
       const bonuses = ['HEADSHOT','OVERKILL','PARRY','DISRESPECT','RICOSHOT',
@@ -2864,13 +2851,15 @@ function frame(nowMs) {
   if (kickDelta * percGate > 0.005 && kick > 0.12 && spawnCooldowns.kick <= 0) {
     spawnCooldowns.kick = 0.4;
     const r = Math.random();
-    if (r < 0.35) spawnObject(1, 8 + Math.random()*15, 3.0, 0.8 + Math.random()*0.5, 4 + Math.random()*4);
-    else if (r < 0.55) spawnObject(10, 5 + Math.random()*8, 2.5, 0.6, 2 + Math.random()*2); // sawblade
-    else if (r < 0.75) spawnObject(2, 5 + Math.random()*8, 2.5, 0.5 + Math.random()*0.3, 2 + Math.random()*2);
+    if (r < 0.25) spawnObject(15, 10 + Math.random()*12, 3.0, 1.2 + Math.random()*0.6, 3 + Math.random()*3); // hero cube
+    else if (r < 0.40) spawnObject(1, 8 + Math.random()*15, 3.0, 0.8 + Math.random()*0.5, 4 + Math.random()*4);
+    else if (r < 0.60) spawnObject(10, 5 + Math.random()*8, 2.5, 0.6, 2 + Math.random()*2); // sawblade
+    else if (r < 0.80) spawnObject(2, 5 + Math.random()*8, 2.5, 0.5 + Math.random()*0.3, 2 + Math.random()*2);
     else spawnObject(6, 3 + Math.random()*5, 2.0, 0.2, 1 + Math.random()*2);
   }
   if (bands.low - prevSnare > 0.008 && spawnCooldowns.snare <= 0) {
     spawnCooldowns.snare = 0.25;
+    if (Math.random() < 0.3) spawnObject(15, 8 + Math.random()*10, 3.0, 1.0 + Math.random()*0.4, 2 + Math.random()*2); // hero cube
     for (let i = 0; i < 2; i++) spawnObject(6, 3 + Math.random()*6, 2.5, 0.15 + Math.random()*0.1, 1 + Math.random()*2);
     if (Math.random() < 0.3) spawnObject(12, 4 + Math.random()*6, 2.0, 0.4, 1.5 + Math.random()*1.5); // coin
     else if (Math.random() < 0.3) spawnObject(7, 6 + Math.random()*10, 3.0, 1.2, 3 + Math.random()*3);
@@ -2878,9 +2867,10 @@ function frame(nowMs) {
   if (chaos > 0.3 && spawnCooldowns.hat <= 0) {
     spawnCooldowns.hat = 0.8;
     const r = Math.random();
-    if (r < 0.25) spawnObject(7, 8 + Math.random()*12, 3.5, 1.0, 3 + Math.random()*3);
-    else if (r < 0.5) spawnObject(8, 6 + Math.random()*10, 3.0, 0.8, 3 + Math.random()*3); // gear
-    else if (r < 0.7) spawnObject(10, 5 + Math.random()*8, 2.5, 0.7, 2 + Math.random()*2); // sawblade
+    if (r < 0.2) spawnObject(15, 9 + Math.random()*12, 3.2, 0.8 + Math.random()*0.4, 2 + Math.random()*2); // hero cube
+    else if (r < 0.35) spawnObject(7, 8 + Math.random()*12, 3.5, 1.0, 3 + Math.random()*3);
+    else if (r < 0.55) spawnObject(8, 6 + Math.random()*10, 3.0, 0.8, 3 + Math.random()*3); // gear
+    else if (r < 0.75) spawnObject(10, 5 + Math.random()*8, 2.5, 0.7, 2 + Math.random()*2); // sawblade
     else spawnObject(1, 10 + Math.random()*15, 3.5, 0.6, 4 + Math.random()*4);
   }
   if (section === 'drop' && energyHistory.prevSection !== 'drop' && spawnCooldowns.drop <= 0) {
@@ -2908,15 +2898,16 @@ function frame(nowMs) {
     if (activeCount < 5) {
       spawnCooldowns.ambient = 1.2 + Math.random() * 0.8;
       const r = Math.random();
-      if (r < 0.12) spawnObject(5, 25 + Math.random()*25, 5.0, 1.5 + Math.random(), 10 + Math.random()*10); // monolith
-      else if (r < 0.22) spawnObject(7, 10 + Math.random()*15, 3.5, 1.0, 4 + Math.random()*4); // energy ring
-      else if (r < 0.32) spawnObject(2, 8 + Math.random()*12, 3.0, 0.6, 3 + Math.random()*3); // cross blade
-      else if (r < 0.42) spawnObject(4, 15 + Math.random()*15, 4.0, 1.5, 5 + Math.random()*5); // void frame
-      else if (r < 0.52) spawnObject(8, 8 + Math.random()*12, 3.0, 0.8, 4 + Math.random()*3); // gear
-      else if (r < 0.62) spawnObject(9, 20 + Math.random()*20, 4.0, 1.2, 8 + Math.random()*6); // antenna
-      else if (r < 0.72) spawnObject(11, 10 + Math.random()*12, 3.0, 0.8, 5 + Math.random()*4); // piston
-      else if (r < 0.82) spawnObject(10, 6 + Math.random()*10, 3.0, 0.6, 3 + Math.random()*3); // sawblade
-      else if (r < 0.92) spawnObject(13, 15 + Math.random()*15, 4.0, 1.0, 6 + Math.random()*4); // railgun
+      if (r < 0.15) spawnObject(15, 12 + Math.random()*15, 3.5, 0.9 + Math.random()*0.5, 3 + Math.random()*3); // hero cube (frequent)
+      else if (r < 0.22) spawnObject(5, 25 + Math.random()*25, 5.0, 1.5 + Math.random(), 10 + Math.random()*10); // monolith
+      else if (r < 0.32) spawnObject(7, 10 + Math.random()*15, 3.5, 1.0, 4 + Math.random()*4); // energy ring
+      else if (r < 0.42) spawnObject(2, 8 + Math.random()*12, 3.0, 0.6, 3 + Math.random()*3); // cross blade
+      else if (r < 0.52) spawnObject(4, 15 + Math.random()*15, 4.0, 1.5, 5 + Math.random()*5); // void frame
+      else if (r < 0.62) spawnObject(8, 8 + Math.random()*12, 3.0, 0.8, 4 + Math.random()*3); // gear
+      else if (r < 0.72) spawnObject(9, 20 + Math.random()*20, 4.0, 1.2, 8 + Math.random()*6); // antenna
+      else if (r < 0.80) spawnObject(11, 10 + Math.random()*12, 3.0, 0.8, 5 + Math.random()*4); // piston
+      else if (r < 0.88) spawnObject(10, 6 + Math.random()*10, 3.0, 0.6, 3 + Math.random()*3); // sawblade
+      else if (r < 0.95) spawnObject(13, 15 + Math.random()*15, 4.0, 1.0, 6 + Math.random()*4); // railgun
       else spawnObject(14, 20 + Math.random()*20, 4.5, 1.0, 8 + Math.random()*6); // skull (rare)
     }
   }
@@ -2981,9 +2972,8 @@ function frame(nowMs) {
     hitlagFrames = 6; // BH pass hitlag
     bhPassFlash = 1.0;
     bhWorldZ = cameraZ + 50.0 + Math.random() * 40.0;
-    // BH pass tech text burst + voice
+    // BH pass tech text burst
     for (let i = 0; i < 4; i++) spawnTechText(1, 1);
-    if (voiceCooldown <= 0) { speakLine(pickVoice(VOICE_LINES.bhPass)); voiceCooldown = 4.0; }
     // Post-pass rebuild sequence
     rebuildQueue.length = 0;
     rebuildQueue.push({ delay: 0.0, type: 4, zAhead: 5, xyR: 3.0, scale: 1.5, maxLife: 3 });
@@ -3012,12 +3002,6 @@ function frame(nowMs) {
   if (newRank > styleRank) {
     styleFlash = 1.0;
     prevStyleRank = styleRank;
-    // Voice on rank-up
-    if (voiceCooldown <= 0) {
-      const pool = newRank >= 5 ? VOICE_LINES.ultrakill : VOICE_LINES.rankUp;
-      speakLine(pickVoice(pool));
-      voiceCooldown = 4.0;
-    }
     styleRank = newRank;
     styleSustainTime = 0;
     // Rank-up tech text burst + shock ring
@@ -3030,18 +3014,6 @@ function frame(nowMs) {
     styleSustainTime = 0;
   }
   styleFlash *= 0.9;
-
-  // ── Voiceover triggers ──
-  voiceCooldown = Math.max(0, voiceCooldown - dt);
-  if (voiceCooldown <= 0 && isPlaying && voiceSynth) {
-    if (section === 'breakdown' && energy < 0.05 && Math.random() < 0.008) {
-      speakLine(pickVoice(VOICE_LINES.breakdown));
-      voiceCooldown = 6 + Math.random() * 4;
-    } else if (energy < 0.04 && Math.random() < 0.005) {
-      speakLine(pickVoice(VOICE_LINES.idle));
-      voiceCooldown = 8 + Math.random() * 5;
-    }
-  }
 
   // ── Telemetry sampling ──
   telemetryTime += dt;
