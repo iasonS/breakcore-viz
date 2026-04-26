@@ -55,7 +55,14 @@ function callHueLight(lightId, state) {
 function mapAudioToHueState(audioData) {
   const { sub, low, mid, high, energy, kick, section } = audioData;
   const time = Date.now() / 1000;
-  const tremblePhase = Math.sin(time * 8) * 0.5 + 0.5; // 8Hz trembling for low energy
+
+  // Only process if there's actual audio (energy > threshold)
+  if (energy < 0.05) {
+    return null; // Skip update - no audio playing
+  }
+
+  const tremblePhase = Math.sin(time * 6) * 0.5 + 0.5; // 6Hz trembling
+  const isLowEnergy = energy < 0.25; // "Fear" state vs "Excitement"
 
   const sectionColors = {
     breakdown: { hue: 5000, sat: 200 },
@@ -65,53 +72,78 @@ function mapAudioToHueState(audioData) {
   };
 
   const sectionColor = sectionColors[section] || sectionColors.sustain;
-
   const lights = {};
 
-  // Light 1 (Big room): Overall energy + section mood, with dynamic hue shift
-  const bigHue = sectionColor.hue + Math.round(energy * 5000); // Hue shifts with energy
-  const bigBri = energy < 0.2
-    ? Math.round(50 + tremblePhase * 30) // Tremble when energy is low
-    : Math.max(80, Math.round(energy * 254));
+  // Light 1 (Big room): Section mood + energy intensity
+  if (isLowEnergy) {
+    // LOW ENERGY: Subtle, fearful trembling, muted colors
+    const fearTremble = tremblePhase * 20 + 30; // 30-50 range
+    lights[LIGHT_BIG] = {
+      on: true,
+      bri: Math.round(fearTremble),
+      hue: sectionColor.hue, // No hue shift at low energy - stay base color
+      sat: Math.round(sectionColor.sat * 0.6), // Desaturated = fear
+      transitiontime: 0,
+    };
+  } else {
+    // HIGH ENERGY: Dramatic, saturated, big hue shifts
+    const hueShift = energy > 0.7 ? energy * 10000 : energy * 5000;
+    lights[LIGHT_BIG] = {
+      on: true,
+      bri: Math.round(80 + energy * 170), // 80-250 range
+      hue: Math.round((sectionColor.hue + hueShift) % 65536),
+      sat: Math.round(sectionColor.sat * (0.8 + energy * 0.2)), // More saturated at high energy
+      transitiontime: 0,
+    };
+  }
 
-  lights[LIGHT_BIG] = {
-    on: true,
-    bri: bigBri,
-    hue: Math.round(bigHue % 65536),
-    sat: Math.round(sectionColor.sat * (0.7 + energy * 0.3)),
-    transitiontime: 0,
-  };
-
-  // Light 2 (Left desk): Bass-dominant, very responsive to kicks
+  // Light 2 (Left desk): Bass-dominant, responsive to kicks
   const bassEnergy = Math.min(1, (sub * 2.5 + low * 1.5) / 2);
   const kickIntensity = Math.max(0, Math.min(1, kick * 2.0));
-  const pcHue = 3000 + (kickIntensity * 3000); // Red to orange on kicks
-  const pcBri = bassEnergy < 0.15
-    ? Math.round(30 + tremblePhase * 40)
-    : Math.round((bassEnergy * 0.5 + kickIntensity * 0.5) * 254);
 
-  lights[LIGHT_PC] = {
-    on: true,
-    bri: Math.max(30, pcBri),
-    hue: Math.round(pcHue),
-    sat: 240,
-    transitiontime: 0,
-  };
+  if (isLowEnergy) {
+    // LOW: Subtle bass rumble
+    lights[LIGHT_PC] = {
+      on: true,
+      bri: Math.round(40 + bassEnergy * 40 + tremblePhase * 15),
+      hue: 6000, // Warm orange, stable
+      sat: 200,
+      transitiontime: 0,
+    };
+  } else {
+    // HIGH: Dramatic kick response, red when pounding
+    lights[LIGHT_PC] = {
+      on: true,
+      bri: Math.round(100 + bassEnergy * 150 + kickIntensity * 50),
+      hue: 3000 + (kickIntensity * 2000), // Red to orange on kicks
+      sat: 240,
+      transitiontime: 0,
+    };
+  }
 
-  // Light 3 (Screen): Full spectrum response (bass + treble), cool colors
+  // Light 3 (Screen): Full spectrum response
   const fullEnergy = Math.min(1, (sub * 0.5 + low * 0.8 + mid * 1.2 + high * 1.5) / 2);
-  const screenHue = 44000 + Math.round(fullEnergy * 8000); // Blue to magenta
-  const screenBri = fullEnergy < 0.15
-    ? Math.round(40 + tremblePhase * 50)
-    : Math.round(fullEnergy * 254);
 
-  lights[LIGHT_SCREEN] = {
-    on: true,
-    bri: Math.max(40, screenBri),
-    hue: Math.round(screenHue % 65536),
-    sat: Math.round(180 + fullEnergy * 74),
-    transitiontime: 0,
-  };
+  if (isLowEnergy) {
+    // LOW: Subtle cool glow, fearful
+    lights[LIGHT_SCREEN] = {
+      on: true,
+      bri: Math.round(50 + fullEnergy * 40 + tremblePhase * 15),
+      hue: 48000, // Fixed cool purple
+      sat: 150,
+      transitiontime: 0,
+    };
+  } else {
+    // HIGH: Dramatic spectrum sweep, saturated
+    const screenHue = 44000 + (fullEnergy * 10000); // Blue to magenta
+    lights[LIGHT_SCREEN] = {
+      on: true,
+      bri: Math.round(100 + fullEnergy * 150),
+      hue: Math.round(screenHue % 65536),
+      sat: Math.round(200 + fullEnergy * 54),
+      transitiontime: 0,
+    };
+  }
 
   return lights;
 }
@@ -145,7 +177,16 @@ const server = http.createServer(async (req, res) => {
         const audioData = JSON.parse(body);
         const hueStates = mapAudioToHueState(audioData);
 
-        console.log('Sync:', audioData, '→', hueStates);
+        if (!hueStates) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, skipped: 'energy too low' }));
+          return;
+        }
+
+        console.log(`[${new Date().toISOString()}] energy=${audioData.energy.toFixed(3)} kick=${audioData.kick.toFixed(3)} section=${audioData.section}`);
+        console.log('  big:', hueStates[LIGHT_BIG]);
+        console.log('  left:', hueStates[LIGHT_PC]);
+        console.log('  screen:', hueStates[LIGHT_SCREEN]);
 
         const promises = Object.entries(hueStates).map(([lightId, state]) => callHueLight(lightId, state));
         await Promise.all(promises);

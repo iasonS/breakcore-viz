@@ -3119,18 +3119,22 @@ function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, section
   }
 
   if (hueServiceUrl && hueFrameCounter++ % 9 === 0) {
+    const huePayload = {
+      sub: bands.sub,
+      low: bands.low,
+      mid: bands.mid,
+      high: bands.high,
+      energy,
+      kick: Math.min(1, bands.sub * 3),
+      section: energyHistory.section,
+    };
+    if (energy > 0.05) {
+      console.log(`[HUE] energy=${energy.toFixed(3)} kick=${huePayload.kick.toFixed(3)} section=${huePayload.section}`);
+    }
     fetch(hueServiceUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sub: bands.sub,
-        low: bands.low,
-        mid: bands.mid,
-        high: bands.high,
-        energy,
-        kick: Math.min(1, bands.sub * 3),
-        section: energyHistory.section,
-      }),
+      body: JSON.stringify(huePayload),
     }).catch(() => {});
   }
 }
