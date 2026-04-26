@@ -3119,11 +3119,23 @@ function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, section
   }
 
   if (hueServiceUrl && hueFrameCounter++ % 9 === 0) {
-    syncHueState();
+    fetch(hueServiceUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sub: bands.sub,
+        low: bands.low,
+        mid: bands.mid,
+        high: bands.high,
+        energy,
+        kick: Math.min(1, bands.sub * 3),
+        section: energyHistory.section,
+      }),
+    }).catch(() => {});
   }
 }
 
-// Hue Lights Sync Setup
+// Hue Lights Sync
 const hueServiceUrl = (() => {
   const hostname = window.location.hostname;
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
@@ -3131,25 +3143,7 @@ const hueServiceUrl = (() => {
   }
   return `http://${hostname}:8087/sync`;
 })();
-
 let hueFrameCounter = 0;
-
-function syncHueState() {
-  if (!hueServiceUrl) return;
-  fetch(hueServiceUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sub: bands.sub,
-      low: bands.low,
-      mid: bands.mid,
-      high: bands.high,
-      energy,
-      kick: Math.min(1, bands.sub * 3),
-      section: energyHistory.section,
-    }),
-  }).catch(() => {});
-}
 
 requestAnimationFrame(frame);
 console.log('Breakcore Visualizer v9.0 — ULTRAKILL Impact + Spawn Pool + Monochrome — WebGL2');
