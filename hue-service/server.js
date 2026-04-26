@@ -54,6 +54,8 @@ function callHueLight(lightId, state) {
 
 function mapAudioToHueState(audioData) {
   const { sub, low, mid, high, energy, kick, section } = audioData;
+  const time = Date.now() / 1000;
+  const tremblePhase = Math.sin(time * 8) * 0.5 + 0.5; // 8Hz trembling for low energy
 
   const sectionColors = {
     breakdown: { hue: 5000, sat: 200 },
@@ -66,34 +68,49 @@ function mapAudioToHueState(audioData) {
 
   const lights = {};
 
+  // Light 1 (Big room): Overall energy + section mood, with dynamic hue shift
+  const bigHue = sectionColor.hue + Math.round(energy * 5000); // Hue shifts with energy
+  const bigBri = energy < 0.2
+    ? Math.round(50 + tremblePhase * 30) // Tremble when energy is low
+    : Math.max(80, Math.round(energy * 254));
+
   lights[LIGHT_BIG] = {
     on: true,
-    bri: Math.max(100, Math.round(energy * 254)),
-    hue: sectionColor.hue,
-    sat: sectionColor.sat,
-    transitiontime: 1,
+    bri: bigBri,
+    hue: Math.round(bigHue % 65536),
+    sat: Math.round(sectionColor.sat * (0.7 + energy * 0.3)),
+    transitiontime: 0,
   };
 
-  const bassEnergy = Math.min(1, (sub * 2 + low) / 2);
-  const kickIntensity = Math.max(0, Math.min(1, kick * 1.5));
-  const pcHue = kickIntensity > 0.7 ? 3000 : 6000;
-  const pcSat = 220 + (kickIntensity * 34);
+  // Light 2 (Left desk): Bass-dominant, very responsive to kicks
+  const bassEnergy = Math.min(1, (sub * 2.5 + low * 1.5) / 2);
+  const kickIntensity = Math.max(0, Math.min(1, kick * 2.0));
+  const pcHue = 3000 + (kickIntensity * 3000); // Red to orange on kicks
+  const pcBri = bassEnergy < 0.15
+    ? Math.round(30 + tremblePhase * 40)
+    : Math.round((bassEnergy * 0.5 + kickIntensity * 0.5) * 254);
 
   lights[LIGHT_PC] = {
     on: true,
-    bri: Math.max(50, Math.round((bassEnergy * 0.7 + kickIntensity * 0.3) * 254)),
+    bri: Math.max(30, pcBri),
     hue: Math.round(pcHue),
-    sat: Math.round(Math.min(254, pcSat)),
-    transitiontime: 1,
+    sat: 240,
+    transitiontime: 0,
   };
 
-  const trebleEnergy = Math.min(1, (mid * 0.7 + high * 1.3) / 2);
+  // Light 3 (Screen): Full spectrum response (bass + treble), cool colors
+  const fullEnergy = Math.min(1, (sub * 0.5 + low * 0.8 + mid * 1.2 + high * 1.5) / 2);
+  const screenHue = 44000 + Math.round(fullEnergy * 8000); // Blue to magenta
+  const screenBri = fullEnergy < 0.15
+    ? Math.round(40 + tremblePhase * 50)
+    : Math.round(fullEnergy * 254);
+
   lights[LIGHT_SCREEN] = {
     on: true,
-    bri: Math.max(50, Math.round(trebleEnergy * 254)),
-    hue: 44000 + Math.round(trebleEnergy * 6000),
-    sat: Math.round(150 + trebleEnergy * 104),
-    transitiontime: 1,
+    bri: Math.max(40, screenBri),
+    hue: Math.round(screenHue % 65536),
+    sat: Math.round(180 + fullEnergy * 74),
+    transitiontime: 0,
   };
 
   return lights;
@@ -127,6 +144,8 @@ const server = http.createServer(async (req, res) => {
       try {
         const audioData = JSON.parse(body);
         const hueStates = mapAudioToHueState(audioData);
+
+        console.log('Sync:', audioData, '→', hueStates);
 
         const promises = Object.entries(hueStates).map(([lightId, state]) => callHueLight(lightId, state));
         await Promise.all(promises);
