@@ -53,7 +53,7 @@ function callHueLight(lightId, state) {
 }
 
 function mapAudioToHueState(audioData) {
-  const { sub, low, mid, high, energy, kick, section } = audioData;
+  const { sub, low, mid, high, energy, kick, section, anticipation = 0, timeToNextDrop = 999, bpm = 0 } = audioData;
   const time = Date.now() / 1000;
 
   // Only process if there's actual audio (energy > threshold)
@@ -61,8 +61,12 @@ function mapAudioToHueState(audioData) {
     return null; // Skip update - no audio playing
   }
 
-  const tremblePhase = Math.sin(time * 6) * 0.5 + 0.5; // 6Hz trembling
-  const isLowEnergy = energy < 0.25; // "Fear" state vs "Excitement"
+  const tremblePhase = Math.sin(time * 8) * 0.5 + 0.5; // 8Hz trembling (faster)
+  const isLowEnergy = energy < 0.35;
+
+  // Anticipation boost: builds drama 3s before a drop
+  const anticipationBoost = anticipation * anticipation; // Squared for more drama
+  const effectiveEnergy = Math.min(1, energy + anticipationBoost * 0.3); // Boost energy by anticipation
 
   const sectionColors = {
     breakdown: { hue: 5000, sat: 200 },
@@ -74,25 +78,28 @@ function mapAudioToHueState(audioData) {
   const sectionColor = sectionColors[section] || sectionColors.sustain;
   const lights = {};
 
-  // Light 1 (Big room): Section mood + energy intensity
-  if (isLowEnergy) {
-    // LOW ENERGY: Subtle, fearful trembling, muted colors
-    const fearTremble = tremblePhase * 20 + 30; // 30-50 range
+  // Light 1 (Big room): Section mood + energy intensity + anticipation buildup
+  const bigBriBoost = anticipationBoost * 80; // Anticipation adds up to 80 brightness
+
+  if (isLowEnergy && anticipation < 0.5) {
+    // LOW ENERGY (not anticipating): Active trembling, more color variation
+    const fearTremble = tremblePhase * 60 + 50; // 50-110 range
+    const hueWander = Math.sin(time * 2) * 3000; // Slow hue wander
     lights[LIGHT_BIG] = {
       on: true,
-      bri: Math.round(fearTremble),
-      hue: sectionColor.hue, // No hue shift at low energy - stay base color
-      sat: Math.round(sectionColor.sat * 0.6), // Desaturated = fear
+      bri: Math.round(fearTremble + bigBriBoost),
+      hue: Math.round((sectionColor.hue + hueWander) % 65536),
+      sat: Math.round(sectionColor.sat * (0.7 + tremblePhase * 0.3)),
       transitiontime: 0,
     };
   } else {
-    // HIGH ENERGY: Dramatic, saturated, big hue shifts
-    const hueShift = energy > 0.7 ? energy * 10000 : energy * 5000;
+    // HIGH ENERGY or ANTICIPATING DROP: Dramatic, saturated, big hue shifts
+    const hueShift = (effectiveEnergy > 0.7 ? effectiveEnergy * 10000 : effectiveEnergy * 5000) + (anticipation * 5000);
     lights[LIGHT_BIG] = {
       on: true,
-      bri: Math.round(80 + energy * 170), // 80-250 range
+      bri: Math.round(80 + effectiveEnergy * 170 + bigBriBoost), // Anticipation adds brightness
       hue: Math.round((sectionColor.hue + hueShift) % 65536),
-      sat: Math.round(sectionColor.sat * (0.8 + energy * 0.2)), // More saturated at high energy
+      sat: Math.round(sectionColor.sat * (0.8 + effectiveEnergy * 0.2 + anticipation * 0.2)),
       transitiontime: 0,
     };
   }
@@ -102,12 +109,12 @@ function mapAudioToHueState(audioData) {
   const kickIntensity = Math.max(0, Math.min(1, kick * 2.0));
 
   if (isLowEnergy) {
-    // LOW: Subtle bass rumble
+    // LOW: Active bass rumble, pulsing brightness
     lights[LIGHT_PC] = {
       on: true,
-      bri: Math.round(40 + bassEnergy * 40 + tremblePhase * 15),
-      hue: 6000, // Warm orange, stable
-      sat: 200,
+      bri: Math.round(60 + bassEnergy * 70 + tremblePhase * 40), // 60-170 range
+      hue: 4000 + (bassEnergy * 2000), // Orange to red-orange with bass
+      sat: 220 + (tremblePhase * 34), // Pulsing saturation
       transitiontime: 0,
     };
   } else {
@@ -125,12 +132,13 @@ function mapAudioToHueState(audioData) {
   const fullEnergy = Math.min(1, (sub * 0.5 + low * 0.8 + mid * 1.2 + high * 1.5) / 2);
 
   if (isLowEnergy) {
-    // LOW: Subtle cool glow, fearful
+    // LOW: Active cool glow, pulsing
+    const colorWander = Math.cos(time * 1.5) * 2000; // Color oscillates
     lights[LIGHT_SCREEN] = {
       on: true,
-      bri: Math.round(50 + fullEnergy * 40 + tremblePhase * 15),
-      hue: 48000, // Fixed cool purple
-      sat: 150,
+      bri: Math.round(70 + fullEnergy * 70 + tremblePhase * 40), // 70-180 range
+      hue: Math.round((46000 + colorWander) % 65536), // Purple oscillates
+      sat: Math.round(160 + tremblePhase * 94), // Pulsing saturation 160-254
       transitiontime: 0,
     };
   } else {

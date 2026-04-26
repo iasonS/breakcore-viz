@@ -3119,26 +3119,36 @@ function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, section
   }
 
   if (hueServiceUrl && hueFrameCounter++ % 9 === 0) {
-    let syncData = { sub: bands.sub, low: bands.low, mid: bands.mid, high: bands.high, energy, kick: Math.min(1, bands.sub * 3), section: energyHistory.section };
+    let syncData = {
+      sub: bands.sub, low: bands.low, mid: bands.mid, high: bands.high,
+      energy, kick: Math.min(1, bands.sub * 3), section: energyHistory.section,
+      anticipation: 0, bpm: 0, timeToNextDrop: 999,
+    };
 
     // Use offline pre-analyzed data if available (future-aware)
     if (offlineMode && offlineTimeline) {
       const f = getOfflineFrame();
       if (f >= 0 && f < offlineTimeline.frameCount) {
-        syncData = {
-          sub: offlineTimeline.sub[f],
-          low: offlineTimeline.low[f],
-          mid: offlineTimeline.mid[f],
-          high: offlineTimeline.high[f],
-          energy: offlineTimeline.energy[f],
-          kick: Math.min(1, offlineTimeline.sub[f] * 3),
-          section: energyHistory.section,
-        };
+        syncData.sub = offlineTimeline.sub[f];
+        syncData.low = offlineTimeline.low[f];
+        syncData.mid = offlineTimeline.mid[f];
+        syncData.high = offlineTimeline.high[f];
+        syncData.energy = offlineTimeline.energy[f];
+        syncData.kick = Math.min(1, offlineTimeline.sub[f] * 3);
       }
     }
 
+    // Include look-ahead data (anticipation ramps up 3s before drops)
+    syncData.anticipation = lookAhead.anticipation;
+    syncData.timeToNextDrop = lookAhead.nextDropIn;
+
+    // Include BPM if available
+    if (offlineMode && offlineSections && offlineSections.bpm) {
+      syncData.bpm = offlineSections.bpm;
+    }
+
     if (syncData.energy > 0.05) {
-      console.log(`[HUE] energy=${syncData.energy.toFixed(3)} kick=${syncData.kick.toFixed(3)} section=${syncData.section} mode=${offlineMode ? 'offline' : 'realtime'}`);
+      console.log(`[HUE] energy=${syncData.energy.toFixed(3)} anticipation=${syncData.anticipation.toFixed(2)} drop_in=${syncData.timeToNextDrop.toFixed(1)}s bpm=${syncData.bpm} section=${syncData.section}`);
     }
 
     fetch(hueServiceUrl, {
