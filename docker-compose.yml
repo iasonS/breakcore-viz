@@ -8,3 +8,16 @@ services:
     environment:
       - RUST_LOG=info
     restart: unless-stopped
+
+  hue-service:
+    build:
+      context: ./hue-service
+    ports:
+      - "8087:3001"
+    environment:
+      - HUE_BRIDGE_IP=${HUE_BRIDGE_IP}
+      - HUE_API_KEY=${HUE_API_KEY}
+      - HUE_LIGHT_BIG=${HUE_LIGHT_BIG:-1}
+      - HUE_LIGHT_PC=${HUE_LIGHT_PC:-2}
+      - HUE_LIGHT_SCREEN=${HUE_LIGHT_SCREEN:-3}
+    restart: unless-stopped

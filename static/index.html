@@ -3146,6 +3146,38 @@ function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, section
     extraInfo += offlineMode ? ' [ANALYZED]' : ' [REALTIME]';
     document.getElementById('hud-extra').textContent = extraInfo;
   }
+
+  if (hueServiceUrl && hueFrameCounter++ % 9 === 0) {
+    syncHueState();
+  }
+}
+
+// Hue Lights Sync Setup
+const hueServiceUrl = (() => {
+  const hostname = window.location.hostname;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return null;
+  }
+  return `http://${hostname}:8087/sync`;
+})();
+
+let hueFrameCounter = 0;
+
+function syncHueState() {
+  if (!hueServiceUrl) return;
+  fetch(hueServiceUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sub: bands.sub,
+      low: bands.low,
+      mid: bands.mid,
+      high: bands.high,
+      energy,
+      kick: Math.min(1, bands.sub * 3),
+      section: energyHistory.section,
+    }),
+  }).catch(() => {});
 }
 
 requestAnimationFrame(frame);
