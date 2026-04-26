@@ -3119,22 +3119,32 @@ function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, section
   }
 
   if (hueServiceUrl && hueFrameCounter++ % 9 === 0) {
-    const huePayload = {
-      sub: bands.sub,
-      low: bands.low,
-      mid: bands.mid,
-      high: bands.high,
-      energy,
-      kick: Math.min(1, bands.sub * 3),
-      section: energyHistory.section,
-    };
-    if (energy > 0.05) {
-      console.log(`[HUE] energy=${energy.toFixed(3)} kick=${huePayload.kick.toFixed(3)} section=${huePayload.section}`);
+    let syncData = { sub: bands.sub, low: bands.low, mid: bands.mid, high: bands.high, energy, kick: Math.min(1, bands.sub * 3), section: energyHistory.section };
+
+    // Use offline pre-analyzed data if available (future-aware)
+    if (offlineMode && offlineTimeline) {
+      const f = getOfflineFrame();
+      if (f >= 0 && f < offlineTimeline.frameCount) {
+        syncData = {
+          sub: offlineTimeline.sub[f],
+          low: offlineTimeline.low[f],
+          mid: offlineTimeline.mid[f],
+          high: offlineTimeline.high[f],
+          energy: offlineTimeline.energy[f],
+          kick: Math.min(1, offlineTimeline.sub[f] * 3),
+          section: energyHistory.section,
+        };
+      }
     }
+
+    if (syncData.energy > 0.05) {
+      console.log(`[HUE] energy=${syncData.energy.toFixed(3)} kick=${syncData.kick.toFixed(3)} section=${syncData.section} mode=${offlineMode ? 'offline' : 'realtime'}`);
+    }
+
     fetch(hueServiceUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(huePayload),
+      body: JSON.stringify(syncData),
     }).catch(() => {});
   }
 }
