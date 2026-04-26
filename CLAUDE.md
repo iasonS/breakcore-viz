@@ -57,20 +57,60 @@ Audio-driven continuous parameter mapping (fog density, rep period, speed, corri
 ### Style Meter
 6 ranks: STATIC -> RISING -> VOLATILE -> UNHINGED -> BREAKCORE -> ULTRAKILL. Tracks smoothed energy with 2.5s grace period before downranking. Canvas 2D overlay, bottom-center, shakes on kicks.
 
+## Philips Hue Lights Integration
+
+Sidecar Node.js service (`hue-service/`) syncs lights to analyzed audio in real-time.
+
+### Architecture
+- Frontend sends offline pre-analyzed audio data to hue-service every 150ms (~6.7fps)
+- hue-service maps energy → brightness, frequencies → colors per light
+- Lights respond to *future* audio (offline analysis) not real-time, so they react ahead of beats
+- Rate-limited to 10 requests/sec to Hue Bridge
+
+### Light Mapping
+| Light | ID | Position | Responds To | Low Energy Behavior | High Energy Behavior |
+|-------|----|---------|----|-----|-----|
+| Big | 1 | Room | Overall energy + section mood | Fearful muted trembling | Dramatic hue shifts + saturation |
+| PC Left | 2 | Desk | Bass (sub+low) + kicks | Subtle bass rumble | Red-orange on impacts |
+| Screen | 3 | Display | Full spectrum (sub+low+mid+high) | Cool fearful glow | Magenta saturation + brightness |
+
+### Config (in `.env` on server)
+```env
+HUE_BRIDGE_IP=192.168.1.10
+HUE_API_KEY=<username-from-bridge>
+HUE_LIGHT_BIG=1
+HUE_LIGHT_PC=2
+HUE_LIGHT_SCREEN=3
+```
+
+### Energy States
+- **Low energy (< 0.25)**: 6Hz subtle trembling, desaturated colors, 30–80 brightness range
+- **High energy (≥ 0.25)**: Dramatic changes, saturated colors, 80–254 brightness range
+- **Idle (energy < 0.05)**: No updates sent (lights stay still)
+
 ## Key Files
 
-- `static/index.html` — everything (shaders, audio, overlay, render loop)
+- `static/index.html` — everything (shaders, audio, overlay, render loop, Hue sync)
 - `src/main.rs` — Rust HTTP server (tiny_http, serves index.html + /health)
-- `docker-compose.yml` — container config, port 8086 -> 3000
+- `hue-service/server.js` — Node.js Hue lights sync service
+- `hue-service/Dockerfile` — lightweight Alpine Node image
+- `docker-compose.yml` — orchestrates both Rust and Node services
 - `deploy.sh` — deploys to tt@192.168.1.9:/home/tt/breakcore-viz
 
 ## Deploy
 
 ```bash
 bash deploy.sh
-# -> http://192.168.1.9:8086
+# -> http://192.168.1.9:8086 (visualizer)
+# -> http://192.168.1.9:8087/sync (Hue service, internal)
 ```
+
+Ensure `.env` has `HUE_BRIDGE_IP`, `HUE_API_KEY`, and light IDs before deploying.
 
 ## Dev
 
-Open `static/index.html` directly in browser for local testing. Add `?debug` for HUD overlay. Add `?demo` for synthetic audio mode (no file needed).
+**Browser testing**: Open `static/index.html` directly. Add `?debug` for HUD. Add `?demo` for synthetic audio.
+
+**Console logs**: Look for `[HUE]` messages showing energy/kick/section when music plays.
+
+**Hue service logs**: `docker logs breakcore-viz-hue-service-1` shows exact light state updates.
