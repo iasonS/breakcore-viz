@@ -666,37 +666,42 @@ void main() {
       }
     } else if(abs(dSpawn - nearest) < 0.02 && hitSpawn >= 0) {
       float spawnType = uSpawnA[hitSpawn].w;
+      // Base multipliers restored for calm-phase color; only kick-scaling
+      // stays tamed so peak kicks don't blow surfaces above 1.0.
       if (spawnType < 2.5) {
-        surfCol = kickCol * (0.4 + uKick * 1.0);
+        surfCol = kickCol * (0.4 + uKick * 0.4);
       } else if (spawnType < 5.5) {
-        surfCol = hatCol * (0.2 + uEnergy * 0.2 + uKick * 0.3);
+        surfCol = hatCol * (0.35 + uEnergy * 0.3 + uKick * 0.2);
       } else if (spawnType < 6.5) {
-        surfCol = snareCol * (0.5 + uKick * 0.8 + uHat * 0.8);
+        surfCol = snareCol * (0.5 + uKick * 0.4 + uHat * 0.4);
       } else if (spawnType < 7.5) {
-        surfCol = vec3(0.8, 0.85, 0.9) * (0.4 + uKick * 1.0);
+        surfCol = vec3(0.8, 0.85, 0.9) * (0.4 + uKick * 0.4);
       } else if (spawnType < 8.5) {
-        surfCol = kickCol * (0.5 + uKick * 0.8 + uChaos * 0.3);
+        surfCol = kickCol * (0.45 + uKick * 0.4 + uChaos * 0.2);
       } else if (spawnType < 15.5) {
-        // Type 15: Hero cube — Crimson Desert intense blue-white on kicks
+        // Type 15: Hero cube — base restored, peak tamed (was 3.0x at peak, now 1.7x)
         surfCol = mix(vec3(0.2, 0.35, 0.7), kickCol, uKick * 0.6)
-                  * (0.5 + uEnergy * 0.9 + uKick * 1.6);
+                  * (0.45 + uEnergy * 0.55 + uKick * 0.7);
       } else {
-        // Types 9+ — moderate metallic
-        surfCol = mix(snareCol, kickCol, uKick * 0.3) * (0.3 + uEnergy * 0.3 + uKick * 0.5);
+        surfCol = mix(snareCol, kickCol, uKick * 0.3) * (0.3 + uEnergy * 0.3 + uKick * 0.3);
       }
     } else if (abs(dCube - nearest) < 0.02) {
-      // Crimson Desert cube field — blue-dark metallic, energy-lit edges
+      // Cube field — calm base restored to 0.35 (was 0.35 original, then 0.25),
+      // peak still tamed (was 2.65x, now 1.45x)
       vec3 cubeBase = mix(vec3(0.08, 0.14, 0.32), vec3(0.3, 0.45, 0.75),
                           uEnergy * 0.7 + uKick * 0.5);
-      surfCol = cubeBase * (0.35 + uEnergy * 0.9 + uKick * 1.4);
+      surfCol = cubeBase * (0.35 + uEnergy * 0.5 + uKick * 0.6);
       surfCol *= 0.85 + 0.15 * sin(p.z * 0.4 + uTime * 0.25);
     } else {
+      // Tunnel walls — base restored to 0.4, kick scale stays 0.5
       surfCol = mix(snareCol, kickCol, uKick * 0.5);
       surfCol = mix(surfCol, hatCol, uHat * 0.3);
-      surfCol *= 0.4 + uKick * 1.0;
+      surfCol *= 0.4 + uKick * 0.5;
     }
 
-    float glow = (1.0 + uKick*1.0) / (1.0 + dist*0.08);
+    // Close-object glow — base restored to 0.9 (calm has visible objects),
+    // kick scale stays 0.5 (peak max 1.4x instead of original 2.0x)
+    float glow = (0.9 + uKick*0.5) / (1.0 + dist*0.08);
     col = surfCol * glow;
 
     vec3 rimCol = mix(hatCol, kickCol, 0.5+0.5*sin(uTime));
@@ -855,25 +860,28 @@ void main() {
   // PHASE 7: Multiple bloom passes for mega glow
   vec3 bloom = vec3(0.0); float total = 0.0;
 
-  // Pass 1: Wide bloom
+  // Pass 1: Tight bloom (6.0 -> 4.0) for sharper, more tendril-like glow
   for (int i = -4; i <= 4; i++) {
     float w = exp(-float(i*i)/4.0);
-    bloom += sampleScene(uv + vec2(float(i)/uRes.x*6.0, 0.0)) * w;
-    bloom += sampleScene(uv + vec2(0.0, float(i)/uRes.y*6.0)) * w;
+    bloom += sampleScene(uv + vec2(float(i)/uRes.x*4.0, 0.0)) * w;
+    bloom += sampleScene(uv + vec2(0.0, float(i)/uRes.y*4.0)) * w;
     total += w * 2.0;
   }
 
-  // Pass 2: Extended bloom at high energy
+  // Pass 2: Extended bloom at high energy — tightened spread (12.0 -> 6.0) to
+  // keep tendrils tendril-shaped instead of bleeding into 90% screen wash
   if (uEnergy > 0.6) {
     for (int i = -8; i <= 8; i+=2) {
       float w = exp(-float(i*i)/16.0);
-      bloom += sampleScene(uv + vec2(float(i)/uRes.x*12.0, 0.0)) * w * 0.5;
-      bloom += sampleScene(uv + vec2(0.0, float(i)/uRes.y*12.0)) * w * 0.5;
+      bloom += sampleScene(uv + vec2(float(i)/uRes.x*6.0, 0.0)) * w * 0.5;
+      bloom += sampleScene(uv + vec2(0.0, float(i)/uRes.y*6.0)) * w * 0.5;
       total += w * 2.0 * 0.5;
     }
   }
 
-  float bloomThresh = mix(${CFG.post.bloomThreshold.toFixed(2)}, 0.0, smoothstep(0.3, 1.0, uEnergy));
+  // Threshold floored at 0.08 even at peak energy — only bright tendril pixels
+  // bloom, not medium-brightness fog/background (was: drops to 0.0 at peak)
+  float bloomThresh = mix(${CFG.post.bloomThreshold.toFixed(2)}, 0.08, smoothstep(0.3, 1.0, uEnergy));
   bloom = max(bloom/total - bloomThresh, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
 
   // BONUS: white-hot overexposure on extreme impact
@@ -881,12 +889,14 @@ void main() {
     bloom = mix(bloom, vec3(1.0), smoothstep(0.5, 1.0, uImpact) * 0.9);
   }
 
-  // PHASE 7: Massive bloom boost at extreme energy
+  // PHASE 7: Heavily reduced peak boost (was 5.0 -> 2.5 -> now 1.3)
+  // to keep tendrils as discrete beams instead of a screen wash
   if (uEnergy > 0.85) {
-    bloom *= mix(1.0, 5.0, smoothstep(0.85, 1.0, uEnergy));
+    bloom *= mix(1.0, 1.3, smoothstep(0.85, 1.0, uEnergy));
   }
 
-  col += bloom * mix(0.04, 1.5, uKick) * mix(1.0, 5.0, uEnergy);
+  // Final col contribution — energy mult heavily reduced (5.0 -> 3.0 -> now 1.5)
+  col += bloom * mix(0.04, 1.5, uKick) * mix(1.0, 1.5, uEnergy);
 
   // Feedback trail — PHASE 6: EXTREME ghosting (longer trails, multiple layers)
   float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.004 - uImpact * 0.02;
@@ -904,23 +914,27 @@ void main() {
 
   float edgeFade = smoothstep(0.0, 0.03, min(min(vUV.x, 1.0-vUV.x), min(vUV.y, 1.0-vUV.y)));
   prev *= edgeFade;
-  col = mix(col, max(prev, col), mix(uKick * 0.08, 0.6, smoothstep(0.6, 1.0, uEnergy)));
+  // Feedback mix at peak reduced 0.6 -> 0.35 — stops brightness accumulating
+  // across frames into a permanent white wash
+  col = mix(col, max(prev, col), mix(uKick * 0.08, 0.35, smoothstep(0.6, 1.0, uEnergy)));
 
   // DYING MODE FLASH STROBING — frequency-reactive
+  // Heavily reduced (was adding +0.18 to all channels at mid energy, creating
+  // the warp section white wash). Now only brief kick flashes pop through.
   vec3 flashCol = vec3(1.0);
   float flashIntensity = 0.0;
 
-  // Kick flash: white → red (driven by uKick)
-  flashIntensity = max(flashIntensity, smoothstep(0.12, 0.35, uKick) * 0.4);
+  // Kick flash (was 0.4, now 0.15)
+  flashIntensity = max(flashIntensity, smoothstep(0.12, 0.35, uKick) * 0.15);
   flashCol = mix(flashCol, vec3(1.0, 0.1, 0.05), smoothstep(0.15, 0.35, uKick));
 
-  // Hat/snare frequency response → RGB flashing
+  // Hat/snare flash (was 0.6, now 0.2)
   float highFreqFlash = (uHat * 0.5 + uSnare * 0.3) * mod(uTime * 30.0, 1.0);
-  flashIntensity = max(flashIntensity, highFreqFlash * 0.6);
+  flashIntensity = max(flashIntensity, highFreqFlash * 0.2);
 
-  // Sub bass → White overexposure flash
+  // Sub bass flash (was 0.8, now 0.25)
   if (uSub > 0.4) {
-    flashIntensity = max(flashIntensity, (uSub - 0.4) * 0.8);
+    flashIntensity = max(flashIntensity, (uSub - 0.4) * 0.25);
     flashCol = mix(flashCol, vec3(1.0, 1.0, 0.8), uSub * 0.3);
   }
 
@@ -934,7 +948,8 @@ void main() {
     flashCol = mix(flashCol, rgbCycle, uChaos * 0.5);
   }
 
-  col += flashCol * flashIntensity * mix(0.2, 1.0, uEnergy);
+  // Final mix reduced (was up to 1.0 at peak energy, now up to 0.35)
+  col += flashCol * flashIntensity * mix(0.1, 0.35, uEnergy);
 
   // BH pass-through flash — red-tinted, softer, no white-out
   if (uFlash > 0.01) {
@@ -949,9 +964,10 @@ void main() {
     col = mix(col, vec3(1.0) - col, invStr);
   }
 
-  // Saturation boost — dying mode (driven by KICK for red saturation spikes)
+  // Saturation boost — calm phase was 0.3 (70% desaturated to gray, killing
+  // geometric world color). Now 0.9 at calm (full color), still pumped at peak.
   vec3 gray = vec3(dot(col, vec3(0.299, 0.587, 0.114)));
-  float saturation = mix(0.3, 1.3 + uKick * 0.5, uEnergy);
+  float saturation = mix(0.9, 1.3 + uKick * 0.5, uEnergy);
   col = mix(gray, col, saturation);
 
   // Red channel boost on kicks — pure red dominance
@@ -959,24 +975,27 @@ void main() {
   col.g = mix(col.g, col.g * 0.3, uKick * 0.6);
   col.b = mix(col.b, col.b * 0.2, uKick * 0.4);
 
-  // Hue rotation — spectrum cycling driven by frequency bands
+  // Hue rotation — spectrum cycling driven by frequency bands.
+  // Global brightness boost reduced (was 1.4+0.4*e, now flat 1.1 at peak)
+  // to keep tendrils discrete instead of washing the whole screen at mid energy.
   float hueShift = uTime * uEnergy * 2.0 + uEnergy * 2.0 + uHat * 3.0 + uSnare * 2.0 + uKick * 4.0;
   col = col * vec3(
     sin(hueShift) * 0.5 + 1.0,
     sin(hueShift + 2.09) * 0.3 + 1.0 + uSub * 0.2,
     sin(hueShift + 4.18) * 0.5 + 1.0
-  ) * mix(1.0, 1.4 + uEnergy * 0.4, uEnergy);
+  ) * mix(1.0, 1.1, uEnergy);
 
-  // Contrast grading — EXTREME S-curve at peaks (dark gets darker, bright explodes)
-  // PHASE 6: Color crushing and extreme clipping
-  float contrastAmt = mix(0.05, 0.25, uEnergy);
+  // Contrast grading — gentler at peaks (was 0.25 -> 0.15) so highlights
+  // don't all clip to pure white above 0.75 brightness
+  float contrastAmt = mix(0.05, 0.15, uEnergy);
   col = smoothstep(contrastAmt, 1.0 - contrastAmt, col);
   col = mix(col, col * col, uKick * 0.3); // non-linear compression on kicks
 
-  // PHASE 6: Aggressive color crushing on sustained high energy
+  // Color crushing tamed — pow 0.4 -> 0.6 (less shadow lift), mult 1.5 -> 1.15
+  // (less highlight blow). Keeps the punch without nuking the tendril detail.
   if (uEnergy > 0.75) {
-    col = pow(col, vec3(0.4 + uEnergy * 0.3)); // Crush shadows
-    col = mix(col, clamp(col * 1.5, 0.0, 1.0), smoothstep(0.75, 1.0, uEnergy)); // Blow highlights
+    col = pow(col, vec3(0.6 + uEnergy * 0.2));
+    col = mix(col, clamp(col * 1.15, 0.0, 1.0), smoothstep(0.75, 1.0, uEnergy));
   }
 
   // Film grain — PHASE 6/7: EXTREME grain and bitcrush effect at high energy
@@ -1018,10 +1037,11 @@ void main() {
   col.g -= redVig * (0.12 + uKick * 0.2);
   col.b -= redVig * (0.18 + uKick * 0.25);
 
-  // Screen burn-in on sustained high energy (red glow)
+  // Screen burn-in on sustained high energy (red glow) — reduced 0.4 -> 0.12
+  // to stop the orange-red wash dominating peak energy frames
   if (uEnergy > 0.7) {
     float burnGlow = smoothstep(0.7, 1.0, uEnergy) * (1.0 - length(vig) * 0.5);
-    col += vec3(burnGlow * 0.4, burnGlow * 0.1, 0.0);
+    col += vec3(burnGlow * 0.12, burnGlow * 0.03, 0.0);
   }
 
   // PHASE 7: Screen edge color bleeding (edges push color inward)
@@ -3454,12 +3474,11 @@ function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, section
       console.log(`[HUE] energy=${syncData.energy.toFixed(3)} anticipation=${syncData.anticipation.toFixed(2)} drop_in=${syncData.timeToNextDrop.toFixed(1)}s bpm=${syncData.bpm} section=${syncData.section}`);
     }
 
-    // DISABLED: Light sync re-enable pending — testing visual revert first
-    // fetch(hueServiceUrl, {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify(syncData),
-    // }).catch(() => {});
+    fetch(hueServiceUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(syncData),
+    }).catch(() => {});
   }
 }
 
