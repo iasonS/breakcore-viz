@@ -1731,23 +1731,55 @@ function detectSections(tl) {
   const timeToNextBreakdown = new Float32Array(frameCount);
   const sectionProgress = new Float32Array(frameCount); // 0-1 progress through current section
 
-  // Pass 1: Find drops — energy jumps from <0.3 to >0.7 within 0.5s (30 frames)
-  const dropWindow = Math.round(0.5 * fps);
+  // Energy stats — log so we can see what range the track actually has
+  let eMin = 1, eMax = 0, eSum = 0;
+  for (let f = 0; f < frameCount; f++) {
+    if (energy[f] < eMin) eMin = energy[f];
+    if (energy[f] > eMax) eMax = energy[f];
+    eSum += energy[f];
+  }
+  const eAvg = eSum / frameCount;
+  console.log(`[ANALYZE] Energy: min=${eMin.toFixed(2)} max=${eMax.toFixed(2)} avg=${eAvg.toFixed(2)} frames=${frameCount}`);
+
+  // Pass 1: Find drops using a long-baseline relative detection.
+  // Threshold is calibrated against the track's actual range so even flat
+  // high-energy tracks produce drops.
+  const baselineWindow = Math.round(4.0 * fps);
+  const currentWindow = Math.round(0.25 * fps);
   const dropFrames = [];
-  for (let f = dropWindow; f < frameCount; f++) {
-    // Look back: was energy low recently?
-    let minBefore = 1;
-    for (let b = 1; b <= dropWindow; b++) {
-      if (energy[f - b] < minBefore) minBefore = energy[f - b];
-    }
-    // Current energy is high, recent past was low
-    if (minBefore < 0.3 && energy[f] > 0.55) {
-      // Check it's not too close to a previous drop
+
+  // Detection diagnostics — track top rises so we know how close we are to triggering
+  let maxRise = 0;
+  let maxRiseFrame = 0;
+
+  for (let f = baselineWindow; f < frameCount; f++) {
+    let baselineSum = 0;
+    for (let b = currentWindow + 1; b <= baselineWindow; b++) baselineSum += energy[f - b];
+    const baseline = baselineSum / (baselineWindow - currentWindow);
+
+    let curSum = 0;
+    for (let b = 0; b < currentWindow; b++) curSum += energy[f - b];
+    const cur = curSum / currentWindow;
+
+    const rise = cur - baseline;
+    if (rise > maxRise) { maxRise = rise; maxRiseFrame = f; }
+
+    // Very lenient: any rise > 0.04 above 4-second baseline, with cur in the
+    // upper third of the track's dynamic range. Breakcore drops are usually
+    // sustained intensity bumps, not absolute quiet->loud transitions.
+    const dynRange = Math.max(0.1, eMax - eMin);
+    const floor = eMin + dynRange * 0.4;
+    const isDrop = (cur > baseline + 0.04 && cur > floor) ||
+                   (baseline < 0.3 && cur > 0.5);
+
+    if (isDrop) {
       if (dropFrames.length === 0 || f - dropFrames[dropFrames.length - 1] > fps * 2) {
         dropFrames.push(f);
       }
     }
   }
+  const dropTimes = dropFrames.slice(0, 5).map(f => (f / fps).toFixed(1) + 's').join(', ');
+  console.log(`[ANALYZE] Drops: ${dropFrames.length} found. First 5 at: [${dropTimes}]. Max rise observed: ${maxRise.toFixed(3)} at ${(maxRiseFrame/fps).toFixed(1)}s`);
 
   // Pass 2: Find breakdowns — sustained energy <0.25 for >2s
   const breakdownMinFrames = Math.round(2 * fps);
