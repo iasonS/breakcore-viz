@@ -136,7 +136,7 @@ const CFG = {
 
   // Shader tuning
   scene: {
-    steps: 56, maxDist: 30.0, surfThreshold: 0.022,
+    steps: 48, maxDist: 30.0, surfThreshold: 0.022,
   },
   post: {
     bloomThreshold: 0.05, bloomIntensity: 12.0, bloomKickBoost: 3.0,
@@ -147,6 +147,8 @@ const CFG = {
   // HUD
   debugMode: new URLSearchParams(window.location.search).has('debug'),
   demoMode: new URLSearchParams(window.location.search).has('demo'),
+  minimalMode: new URLSearchParams(window.location.search).has('minimal'),
+  noPostMode: new URLSearchParams(window.location.search).has('nopost'),
 };
 
 // ─── Error Handling ─────────────────────────────────────────────────
@@ -288,6 +290,14 @@ float tunnelWallSDF(vec3 p) {
 float attractorSDF(vec3 p) {
   vec3 bhPos = vec3(uCamXY, uBHZ);
   vec3 rel = p - bhPos;
+
+  // Invisible early-out: when ray point is far from BH, only horizon matters
+  // (disks extend to ~2x BHSize, so beyond 4x is safely outside).
+  // Coherent branch: nearby pixels agree on far/near, so warp stays unified.
+  float farLen = length(rel);
+  if (farLen > uBHSize * 4.0) {
+    return farLen - uBHSize * 0.4;
+  }
 
   // Tilt the disk so it's not perfectly edge-on
   float tilt = 0.35 + sin(uTime * 0.07) * 0.1;
@@ -502,6 +512,14 @@ float spawnSDF(vec3 p, vec4 slotA, vec4 slotB) {
 
 // ── Crimson Desert Cube Field ──
 float cubefieldSDF(vec3 p) {
+  // Invisible early-out: cube edges live in rxy ~ [1.52, 13.48] (centers 2.25-12.75
+  // with rotated bounding-sphere radius 0.73). Outside that band, the true SDF is
+  // bounded below by the radial gap. Returning that gap is a valid SDF and is
+  // always ≥ 0.52 (well above SURF=0.022) so it cannot be mistaken for a hit.
+  float rxy = length(p.xy);
+  if (rxy < 1.0) return 1.52 - rxy;
+  if (rxy > 14.0) return rxy - 13.48;
+
   float minD = 999.0;
   float period = 1.8;
   float cellZ = floor((p.z + period * 0.5) / period);
@@ -1125,7 +1143,7 @@ function createFBO(w, h) {
   return { fb, tex };
 }
 
-let sceneResFactor = 0.5; // half-res default, quarter on hitlag
+let sceneResFactor = 0.4; // 0.4x normally (perf), quarter on hitlag
 
 function rebuildFBs(forceScene) {
   const w = glCanvas.width, h = glCanvas.height;
@@ -3210,7 +3228,7 @@ function frame(nowMs) {
     renderFrame(dt, time, energy, kick, snare, hat, chaos, section, sectionFogMul, ant);
     return;
   } else {
-    const newFactor = 0.5;
+    const newFactor = 0.4;
     if (Math.abs(sceneResFactor - newFactor) > 0.01) {
       sceneResFactor = newFactor;
       rebuildFBs(true);
@@ -3337,38 +3355,50 @@ function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, section
 
   drawFullscreenTriangle();
 
-  // ── Pass 2: Post-processing ──
-  const src = ppFB[ppIdx], dst = ppFB[1 - ppIdx];
-  gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
-  gl.viewport(0, 0, screenW, screenH);
-  gl.useProgram(postProg);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneFB.tex); gl.uniform1i(postU.uScene, 0);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src.tex); gl.uniform1i(postU.uPrev, 1);
-  gl.uniform1f(postU.uTime, time);
-  gl.uniform1f(postU.uEnergy, energy);
-  gl.uniform1f(postU.uKick, kick);
-  gl.uniform1f(postU.uSnare, snare);
-  gl.uniform1f(postU.uHat, hat);
-  gl.uniform1f(postU.uSub, bands.sub);
-  gl.uniform1f(postU.uChaos, chaos);
-  gl.uniform1f(postU.uCamSpeed, cameraSpeed);
-  gl.uniform1f(postU.uImpact, impactIntensity);
-  gl.uniform1f(postU.uFlash, bhPassFlash);
-  gl.uniform2f(postU.uRes, screenW, screenH);
-  drawFullscreenTriangle();
+  if (CFG.noPostMode) {
+    // Skip post-processing, blit scene directly
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, sceneFB.fb);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.viewport(0, 0, screenW, screenH);
+    gl.blitFramebuffer(0, 0, sceneW, sceneH, 0, 0, screenW, screenH, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+    gl.finish();
+  } else {
+    // ── Pass 2: Post-processing ──
+    const src = ppFB[ppIdx], dst = ppFB[1 - ppIdx];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+    gl.viewport(0, 0, screenW, screenH);
+    gl.useProgram(postProg);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneFB.tex); gl.uniform1i(postU.uScene, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src.tex); gl.uniform1i(postU.uPrev, 1);
+    gl.uniform1f(postU.uTime, time);
+    gl.uniform1f(postU.uEnergy, energy);
+    gl.uniform1f(postU.uKick, kick);
+    gl.uniform1f(postU.uSnare, snare);
+    gl.uniform1f(postU.uHat, hat);
+    gl.uniform1f(postU.uSub, bands.sub);
+    gl.uniform1f(postU.uChaos, chaos);
+    gl.uniform1f(postU.uCamSpeed, cameraSpeed);
+    gl.uniform1f(postU.uImpact, impactIntensity);
+    gl.uniform1f(postU.uFlash, bhPassFlash);
+    gl.uniform2f(postU.uRes, screenW, screenH);
+    drawFullscreenTriangle();
 
-  // Blit to screen
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, dst.fb);
-  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-  gl.viewport(0, 0, screenW, screenH);
-  gl.blitFramebuffer(0, 0, screenW, screenH, 0, 0, screenW, screenH, gl.COLOR_BUFFER_BIT, gl.LINEAR);
-  gl.finish();
-  ppIdx = 1 - ppIdx;
+    // Blit to screen
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, dst.fb);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.viewport(0, 0, screenW, screenH);
+    gl.blitFramebuffer(0, 0, screenW, screenH, 0, 0, screenW, screenH, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+    gl.finish();
+    ppIdx = 1 - ppIdx;
+  }
 
-  // Canvas 2D overlay
-  const W = window.innerWidth, H = window.innerHeight;
-  const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
-  const aliveP = drawOverlay(dt, W, H, energy, kick, hue, section);
+  // Canvas 2D overlay (disabled in minimal mode for performance testing)
+  let aliveP = 0;
+  if (!CFG.minimalMode) {
+    const W = window.innerWidth, H = window.innerHeight;
+    const hue = ((cumulativeHue * 20 + spectralCentroid * 0.1) % 360 + 360) % 360;
+    aliveP = drawOverlay(dt, W, H, energy, kick, hue, section);
+  }
 
   // HUD
   if (showDebug) {
@@ -3424,11 +3454,12 @@ function renderFrame(dt, time, energy, kick, snare, hat, chaos, section, section
       console.log(`[HUE] energy=${syncData.energy.toFixed(3)} anticipation=${syncData.anticipation.toFixed(2)} drop_in=${syncData.timeToNextDrop.toFixed(1)}s bpm=${syncData.bpm} section=${syncData.section}`);
     }
 
-    fetch(hueServiceUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(syncData),
-    }).catch(() => {});
+    // DISABLED: Light sync re-enable pending — testing visual revert first
+    // fetch(hueServiceUrl, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify(syncData),
+    // }).catch(() => {});
   }
 }
 
