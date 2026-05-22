@@ -728,6 +728,14 @@ vec3 contrastGrade(vec3 col) {
 void main() {
   vec2 uv = vUV;
 
+  // PHASE 6: Lens distortion (barrel warping on extreme energy)
+  if (uEnergy > 0.6) {
+    vec2 center = uv - 0.5;
+    float dist = length(center);
+    float distortion = dist * dist * uEnergy * 0.3;
+    uv = center * (1.0 + distortion) + 0.5;
+  }
+
   // Gravity wave distortion on impact
   if (uImpact > 0.01) {
     vec2 center = uv - 0.5;
@@ -736,21 +744,31 @@ void main() {
     uv += normalize(center + 0.001) * wave;
   }
 
-  // Radial warp — center pushes outward on peaks
+  // Radial warp — PHASE 6: EXTREME center distortion
   vec2 center = uv - 0.5;
   float r = length(center);
-  float warpStr = uEnergy * 0.15 + uKick * 0.3;
-  float warp = sin(r * 8.0 - uTime * 4.0) * warpStr * 0.08;
-  uv += normalize(center + 0.001) * warp;
+  float warpStr = uEnergy * 0.25 + uKick * 0.5; // 1.7x stronger
+  float warp = sin(r * 12.0 - uTime * 6.0) * warpStr * 0.15; // Faster, more intense
+  float warp2 = cos(r * 6.0 + uTime * 3.0) * warpStr * 0.08; // Second harmonic
+  uv += normalize(center + 0.001) * (warp + warp2);
 
-  // Vertical wave distortion — screen shimmering
-  float waveAmp = uEnergy * 0.02 + uImpact * 0.05;
-  float waveFreq = 3.0 + uEnergy * 2.0;
-  uv.x += sin(uv.y * waveFreq * 6.28 + uTime * (4.0 + uEnergy * 6.0)) * waveAmp;
+  // Vertical wave distortion — PHASE 6: EXTREME shimmering
+  float waveAmp = uEnergy * 0.04 + uImpact * 0.10; // 2x stronger
+  float waveFreq = 5.0 + uEnergy * 4.0; // Higher frequency
+  uv.x += sin(uv.y * waveFreq * 6.28 + uTime * (5.0 + uEnergy * 8.0)) * waveAmp;
 
-  // Pixel jitter — makes screen shimmer
-  float jitterStr = uEnergy * 0.01 + uChaos * 0.005;
+  // Secondary wave for more turbulence
+  float wave2Amp = uEnergy * 0.02 + uKick * 0.05;
+  uv.y += cos(uv.x * waveFreq * 3.14 + uTime * (3.0 + uKick * 6.0)) * wave2Amp;
+
+  // Pixel jitter — PHASE 6: EXTREME shimmer
+  float jitterStr = uEnergy * 0.02 + uChaos * 0.01; // 2x stronger
   uv += vec2(hash(uv * 100.0 + uTime * 10.0) - 0.5, hash(uv * 200.0 + uTime * 12.0) - 0.5) * jitterStr;
+
+  // PHASE 6: Additional high-frequency jitter on chaos
+  if (uChaos > 0.4) {
+    uv += vec2(hash(uv * 500.0 + uTime * 50.0) - 0.5, hash(uv * 600.0 + uTime * 60.0) - 0.5) * uChaos * 0.01;
+  }
 
   // Reality tears — horizontal glitches (BONUS: more aggressive on chaos)
   float tearChance = smoothstep(0.4, 1.0, uEnergy);
@@ -771,15 +789,26 @@ void main() {
   }
 
   // Chromatic aberration — driven by HAT frequencies (high freq = RGB fringing)
+  // PHASE 6: ULTRA 3-pass CA with extreme separation
   vec2 caDir = uv - 0.5;
-  float caBase = 0.001 + uEnergy * 0.08 + uKick * 0.12 + uHat * 0.15;
-  float caR = caBase * (1.0 + smoothstep(0.1, 0.4, uImpact) * 3.5);
-  float caG = caBase * 0.7;
-  float caB = -caBase * 1.3;
+  float caBase = 0.001 + uEnergy * 0.12 + uKick * 0.18 + uHat * 0.25;
+  float caR = caBase * (1.0 + smoothstep(0.1, 0.4, uImpact) * 4.0);
+  float caG = caBase * 0.6;
+  float caB = -caBase * 1.5;
+
   vec3 col;
   col.r = sampleScene(uv + caDir * caR).r;
   col.g = sampleScene(uv + caDir * caG * 0.5).g;
   col.b = sampleScene(uv + caDir * caB).b;
+
+  // PHASE 6: Secondary CA layer on extreme energy
+  if (uEnergy > 0.7 && uHat > 0.3) {
+    vec3 ca2;
+    ca2.r = sampleScene(uv + caDir * caR * -0.7).r * 0.3;
+    ca2.g = sampleScene(uv + caDir * caG * -0.5).g * 0.3;
+    ca2.b = sampleScene(uv + caDir * caB * -0.6).b * 0.3;
+    col += ca2;
+  }
 
   // Scan line corruption — driven by MID frequencies (mids = glitch intensity)
   float scanIntensity = uEnergy * 2.0 + uSnare * 1.5;
@@ -805,31 +834,59 @@ void main() {
   }
 
   // Bloom — EXTREME (dying mode) with BONUS white-hot overexposure
+  // PHASE 7: Multiple bloom passes for mega glow
   vec3 bloom = vec3(0.0); float total = 0.0;
+
+  // Pass 1: Wide bloom
   for (int i = -4; i <= 4; i++) {
     float w = exp(-float(i*i)/4.0);
     bloom += sampleScene(uv + vec2(float(i)/uRes.x*6.0, 0.0)) * w;
     bloom += sampleScene(uv + vec2(0.0, float(i)/uRes.y*6.0)) * w;
     total += w * 2.0;
   }
-  // Non-linear threshold: stays high until 0.6 energy, then drops to nothing at peaks
+
+  // Pass 2: Extended bloom at high energy
+  if (uEnergy > 0.6) {
+    for (int i = -8; i <= 8; i+=2) {
+      float w = exp(-float(i*i)/16.0);
+      bloom += sampleScene(uv + vec2(float(i)/uRes.x*12.0, 0.0)) * w * 0.5;
+      bloom += sampleScene(uv + vec2(0.0, float(i)/uRes.y*12.0)) * w * 0.5;
+      total += w * 2.0 * 0.5;
+    }
+  }
+
   float bloomThresh = mix(${CFG.post.bloomThreshold.toFixed(2)}, 0.0, smoothstep(0.3, 1.0, uEnergy));
   bloom = max(bloom/total - bloomThresh, 0.0) * ${CFG.post.bloomIntensity.toFixed(1)};
 
   // BONUS: white-hot overexposure on extreme impact
   if (uImpact > 0.5) {
-    bloom = mix(bloom, vec3(1.0), smoothstep(0.5, 1.0, uImpact) * 0.8);
+    bloom = mix(bloom, vec3(1.0), smoothstep(0.5, 1.0, uImpact) * 0.9);
   }
 
-  col += bloom * mix(0.04, 1.2, uKick) * mix(1.0, 4.0, uEnergy);
+  // PHASE 7: Massive bloom boost at extreme energy
+  if (uEnergy > 0.85) {
+    bloom *= mix(1.0, 5.0, smoothstep(0.85, 1.0, uEnergy));
+  }
 
-  // Feedback trail — minimal, kicks only
+  col += bloom * mix(0.04, 1.5, uKick) * mix(1.0, 5.0, uEnergy);
+
+  // Feedback trail — PHASE 6: EXTREME ghosting (longer trails, multiple layers)
   float feedbackZoom = ${CFG.post.feedbackBaseZoom.toFixed(2)} - uCamSpeed * 0.004 - uImpact * 0.02;
   vec2 prevUV = clamp((vUV - 0.5) * feedbackZoom + 0.5, 0.01, 0.99);
-  vec3 prev = samplePrev(prevUV) * 0.5;
+  vec3 prev = samplePrev(prevUV);
+
+  // PHASE 6: Multi-layer ghosting at high energy
+  if (uEnergy > 0.5) {
+    vec3 prev2 = samplePrev(clamp((vUV - 0.5) * (feedbackZoom * 0.95) + 0.5, 0.01, 0.99));
+    vec3 prev3 = samplePrev(clamp((vUV - 0.5) * (feedbackZoom * 0.90) + 0.5, 0.01, 0.99));
+    prev = prev * 0.5 + prev2 * 0.3 + prev3 * 0.2;
+  } else {
+    prev = prev * 0.5;
+  }
+
   float edgeFade = smoothstep(0.0, 0.03, min(min(vUV.x, 1.0-vUV.x), min(vUV.y, 1.0-vUV.y)));
   prev *= edgeFade;
-  col = mix(col, max(prev, col), uKick * 0.08);
+  col = mix(col, max(prev, col), mix(uKick * 0.08, 0.6, smoothstep(0.6, 1.0, uEnergy)));
 
   // DYING MODE FLASH STROBING — frequency-reactive
   vec3 flashCol = vec3(1.0);
@@ -893,13 +950,40 @@ void main() {
   ) * mix(1.0, 1.4 + uEnergy * 0.4, uEnergy);
 
   // Contrast grading — EXTREME S-curve at peaks (dark gets darker, bright explodes)
+  // PHASE 6: Color crushing and extreme clipping
   float contrastAmt = mix(0.05, 0.25, uEnergy);
   col = smoothstep(contrastAmt, 1.0 - contrastAmt, col);
   col = mix(col, col * col, uKick * 0.3); // non-linear compression on kicks
 
-  // Film grain — MORE at high energy
+  // PHASE 6: Aggressive color crushing on sustained high energy
+  if (uEnergy > 0.75) {
+    col = pow(col, vec3(0.4 + uEnergy * 0.3)); // Crush shadows
+    col = mix(col, clamp(col * 1.5, 0.0, 1.0), smoothstep(0.75, 1.0, uEnergy)); // Blow highlights
+  }
+
+  // Film grain — PHASE 6/7: EXTREME grain and bitcrush effect at high energy
   float grain = hash(uv * uRes + fract(uTime * 100.0)) - 0.5;
-  col += grain * (0.05 + uEnergy * 0.15);
+  col += grain * (0.05 + uEnergy * 0.35); // More grain at high energy
+
+  // PHASE 6: Bitcrushing effect (color quantization) on extreme chaos
+  if (uChaos > 0.5) {
+    float bitDepth = mix(8.0, 3.0, smoothstep(0.5, 1.0, uChaos)); // Reduce color depth
+    col = floor(col * bitDepth) / bitDepth;
+  }
+
+  // PHASE 7: TV static noise overlay at extreme chaos
+  if (uChaos > 0.8) {
+    float staticAmount = smoothstep(0.8, 1.0, uChaos) * 0.4;
+    float staticNoise = hash(uv * 1000.0 + uTime * 100.0) - 0.5;
+    col = mix(col, vec3(abs(staticNoise)), staticAmount);
+  }
+
+  // PHASE 7: 1-bit color mode at absolute maximum (energy > 0.95)
+  if (uEnergy > 0.9) {
+    float brightness = (col.r + col.g + col.b) / 3.0;
+    float bwMix = smoothstep(0.9, 1.0, uEnergy);
+    col = mix(col, vec3(step(0.5, brightness)), bwMix * 0.8);
+  }
 
   // Vignette — EXTREME closing on peaks (tunnel vision at max energy)
   vec2 vig = vUV * 2.0 - 1.0;
@@ -922,11 +1006,52 @@ void main() {
     col += vec3(burnGlow * 0.4, burnGlow * 0.1, 0.0);
   }
 
+  // PHASE 7: Screen edge color bleeding (edges push color inward)
+  if (uEnergy > 0.75) {
+    vec2 edgeDist = vec2(min(vUV.x, 1.0 - vUV.x), min(vUV.y, 1.0 - vUV.y));
+    float edgeStr = (1.0 - smoothstep(0.0, 0.3, min(edgeDist.x, edgeDist.y))) * smoothstep(0.75, 1.0, uEnergy);
+    if (vUV.x < 0.1) col.r += edgeStr * 0.5; // Red from left
+    if (vUV.x > 0.9) col.b += edgeStr * 0.5; // Blue from right
+    if (vUV.y < 0.1) col.g += edgeStr * 0.3; // Green from top
+  }
+
+  // PHASE 7: Temporal strobing (frame skip simulation)
+  if (uChaos > 0.85) {
+    float strobe = mod(uTime * 30.0, 1.0) < 0.3 ? 0.5 : 1.0;
+    col *= strobe;
+  }
+
   // MAXIMUM CHAOS MODE — when energy exceeds 0.8, amplify everything
+  // PHASE 6: TOTAL MELTDOWN at extreme energy
   if (uEnergy > 0.8) {
     float chaosAmt = smoothstep(0.8, 1.0, uEnergy);
     col = mix(col, col + vec3(0.2, 0.1, 0.15) * chaosAmt, chaosAmt);
-    col = mix(col, 1.0 - col, chaosAmt * 0.15); // brief inversions
+    col = mix(col, 1.0 - col, chaosAmt * 0.2); // More frequent inversions
+
+    // Screen fragmentation at extreme chaos
+    if (uChaos > 0.7) {
+      float fragSize = 20.0 + uChaos * 30.0;
+      vec2 fragUV = floor(uv * uRes.y / fragSize);
+      float fragShift = hash(fragUV + uTime * 50.0);
+      if (fragShift > 0.7) {
+        col = mix(col, 1.0 - col, 0.5);
+      }
+
+      // PHASE 7: Screen division with offset fragments
+      if (uChaos > 0.85) {
+        vec2 divSize = vec2(uRes.x / (4.0 + uChaos * 8.0), uRes.y / 3.0);
+        vec2 divID = floor(vUV * vec2(4.0 + uChaos * 8.0, 3.0));
+        float divShift = hash(divID + uTime * 100.0);
+
+        if (divShift > 0.5) {
+          // Invert this chunk
+          col = 1.0 - col;
+        } else if (divShift > 0.3) {
+          // Shift this chunk
+          col = vec3(col.r, col.b, col.g);
+        }
+      }
+    }
   }
 
   col = clamp(col, 0.0, 1.0);
@@ -1758,17 +1883,25 @@ function spawnBurst(type, hue) {
   const cfg = CFG.spawn[type];
   let count = Math.floor(rand(...cfg.count));
 
-  // BONUS PHASE 5: MEGA BURST on extreme energy (2-3x more particles)
-  const energyMultiplier = 1.0 + (totalEnergy() - 0.6) * 3.0;
-  if (totalEnergy() > 0.7) count = Math.floor(count * Math.min(energyMultiplier, 3.0));
+  // PHASE 5/6: MEGA BURST on extreme energy (up to 4x at absolute peak)
+  const energyMultiplier = 1.0 + (totalEnergy() - 0.6) * 4.0;
+  if (totalEnergy() > 0.6) count = Math.floor(count * Math.min(energyMultiplier, 4.0));
 
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
-    const spd = rand(...cfg.speed) * (1.0 + totalEnergy() * 0.5); // faster at high energy
+    // PHASE 6: EXTREME velocity boost
+    const spd = rand(...cfg.speed) * (1.0 + totalEnergy() * 1.0); // 2x faster multiplier
+
+    // PHASE 6: Particle color cycles through spectrum based on lifetime
+    let pHue = hue + rand(-20, 20);
+    if (totalEnergy() > 0.7) {
+      pHue = Math.random() * 360; // Random colors at high energy
+    }
+
     spawnOne(
       cx + Math.cos(a) * 10, cy + Math.sin(a) * 10,
       Math.cos(a) * spd, Math.sin(a) * spd,
-      hue + rand(-20, 20), rand(...cfg.size), rand(...cfg.life), cfg.gravity
+      pHue, rand(...cfg.size) * (1.0 + Math.random() * 0.5), rand(...cfg.life), cfg.gravity
     );
   }
 }
@@ -2880,14 +3013,22 @@ function frame(nowMs) {
   }
   impactIntensity *= 0.85;
 
-  // Impulse shake — DYING MODE (violent + persistent)
+  // Impulse shake — PHASE 6: EXTREME VIOLENCE (multi-octave)
   if (kickDelta * percGate > 0.005) {
-    const intensity = kick * 0.5 + energy * 0.1;
-    shakeX += (Math.random() - 0.5) * intensity * 2.0;
-    shakeY += (Math.random() - 0.5) * intensity * 2.0;
+    const intensity = kick * 0.7 + energy * 0.15;
+
+    // Primary shake (high frequency)
+    shakeX += (Math.random() - 0.5) * intensity * 2.5;
+    shakeY += (Math.random() - 0.5) * intensity * 2.5;
+
+    // Secondary shake (lower frequency, more persistent)
+    if (Math.random() < 0.5) {
+      shakeX += (Math.random() - 0.5) * intensity * 1.5;
+      shakeY += (Math.random() - 0.5) * intensity * 1.5;
+    }
   }
-  shakeX *= 0.6;
-  shakeY *= 0.6;
+  shakeX *= 0.5; // Slower decay = longer shake
+  shakeY *= 0.5;
 
   // FOV spring system — BONUS: more aggressive zoom on peaks
   if (kickDelta * percGate > 0.005) {
