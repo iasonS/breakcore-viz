@@ -903,14 +903,9 @@ void main() {
   vec2 prevUV = clamp((vUV - 0.5) * feedbackZoom + 0.5, 0.01, 0.99);
   vec3 prev = samplePrev(prevUV);
 
-  // PHASE 6: Multi-layer ghosting at high energy
-  if (uEnergy > 0.5) {
-    vec3 prev2 = samplePrev(clamp((vUV - 0.5) * (feedbackZoom * 0.95) + 0.5, 0.01, 0.99));
-    vec3 prev3 = samplePrev(clamp((vUV - 0.5) * (feedbackZoom * 0.90) + 0.5, 0.01, 0.99));
-    prev = prev * 0.5 + prev2 * 0.3 + prev3 * 0.2;
-  } else {
-    prev = prev * 0.5;
-  }
+  // Single-layer feedback only. The multi-layer ghosting (3 zoomed samples)
+  // at uEnergy > 0.5 was creating motion-blur / myopia at high energy.
+  prev = prev * 0.5;
 
   float edgeFade = smoothstep(0.0, 0.03, min(min(vUV.x, 1.0-vUV.x), min(vUV.y, 1.0-vUV.y)));
   prev *= edgeFade;
